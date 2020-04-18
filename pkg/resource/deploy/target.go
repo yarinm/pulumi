@@ -15,8 +15,8 @@
 package deploy
 
 import (
-	"github.com/pulumi/pulumi/pkg/resource/config"
-	"github.com/pulumi/pulumi/pkg/tokens"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource/config"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/tokens"
 )
 
 // Target represents information about a deployment target.
@@ -30,6 +30,10 @@ type Target struct {
 // GetPackageConfig returns the set of configuration parameters for the indicated package, if any.
 func (t *Target) GetPackageConfig(pkg tokens.Package) (map[config.Key]string, error) {
 	var result map[config.Key]string
+	if t == nil {
+		return result, nil
+	}
+
 	for k, c := range t.Config {
 		if tokens.Package(k.Namespace()) != pkg {
 			continue

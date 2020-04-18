@@ -15,14 +15,16 @@
 package deploytest
 
 import (
+	"fmt"
+
 	"github.com/blang/semver"
 	uuid "github.com/satori/go.uuid"
 
-	"github.com/pulumi/pulumi/pkg/resource"
-	"github.com/pulumi/pulumi/pkg/resource/plugin"
-	"github.com/pulumi/pulumi/pkg/tokens"
-	"github.com/pulumi/pulumi/pkg/util/contract"
-	"github.com/pulumi/pulumi/pkg/workspace"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource/plugin"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/tokens"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/contract"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/workspace"
 )
 
 type Provider struct {
@@ -30,7 +32,10 @@ type Provider struct {
 	Package tokens.Package
 	Version semver.Version
 
+	Config     resource.PropertyMap
 	configured bool
+
+	GetSchemaF func(version int) ([]byte, error)
 
 	CheckConfigF func(urn resource.URN, olds,
 		news resource.PropertyMap, allowUnknowns bool) (resource.PropertyMap, []plugin.CheckFailure, error)
@@ -78,6 +83,13 @@ func (prov *Provider) GetPluginInfo() (workspace.PluginInfo, error) {
 	}, nil
 }
 
+func (prov *Provider) GetSchema(version int) ([]byte, error) {
+	if prov.GetSchemaF == nil {
+		return []byte("{}"), nil
+	}
+	return prov.GetSchemaF(version)
+}
+
 func (prov *Provider) CheckConfig(urn resource.URN, olds,
 	news resource.PropertyMap, allowUnknowns bool) (resource.PropertyMap, []plugin.CheckFailure, error) {
 	if prov.CheckConfigF == nil {
@@ -97,6 +109,7 @@ func (prov *Provider) Configure(inputs resource.PropertyMap) error {
 	prov.configured = true
 
 	if prov.ConfigureF == nil {
+		prov.Config = inputs
 		return nil
 	}
 	return prov.ConfigureF(inputs)
@@ -154,4 +167,11 @@ func (prov *Provider) Invoke(tok tokens.ModuleMember,
 		return resource.PropertyMap{}, nil, nil
 	}
 	return prov.InvokeF(tok, args)
+}
+
+func (prov *Provider) StreamInvoke(
+	tok tokens.ModuleMember, args resource.PropertyMap,
+	onNext func(resource.PropertyMap) error) ([]plugin.CheckFailure, error) {
+
+	return nil, fmt.Errorf("not implemented")
 }

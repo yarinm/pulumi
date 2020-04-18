@@ -16,7 +16,7 @@
 // limitations under the License.
 //
 'use strict';
-var grpc = require('grpc');
+var grpc = require('@grpc/grpc-js');
 var resource_pb = require('./resource_pb.js');
 var google_protobuf_empty_pb = require('google-protobuf/google/protobuf/empty_pb.js');
 var google_protobuf_struct_pb = require('google-protobuf/google/protobuf/struct_pb.js');
@@ -150,6 +150,17 @@ var ResourceMonitorService = exports.ResourceMonitorService = {
     path: '/pulumirpc.ResourceMonitor/Invoke',
     requestStream: false,
     responseStream: false,
+    requestType: provider_pb.InvokeRequest,
+    responseType: provider_pb.InvokeResponse,
+    requestSerialize: serialize_pulumirpc_InvokeRequest,
+    requestDeserialize: deserialize_pulumirpc_InvokeRequest,
+    responseSerialize: serialize_pulumirpc_InvokeResponse,
+    responseDeserialize: deserialize_pulumirpc_InvokeResponse,
+  },
+  streamInvoke: {
+    path: '/pulumirpc.ResourceMonitor/StreamInvoke',
+    requestStream: false,
+    responseStream: true,
     requestType: provider_pb.InvokeRequest,
     responseType: provider_pb.InvokeResponse,
     requestSerialize: serialize_pulumirpc_InvokeRequest,

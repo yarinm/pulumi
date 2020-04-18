@@ -19,12 +19,12 @@ import (
 	"io"
 
 	pbempty "github.com/golang/protobuf/ptypes/empty"
-	"github.com/pulumi/pulumi/pkg/resource"
-	"github.com/pulumi/pulumi/pkg/resource/deploy/providers"
-	"github.com/pulumi/pulumi/pkg/resource/plugin"
-	"github.com/pulumi/pulumi/pkg/tokens"
-	"github.com/pulumi/pulumi/pkg/util/result"
-	pulumirpc "github.com/pulumi/pulumi/sdk/proto/go"
+	"github.com/pulumi/pulumi/pkg/v2/resource/deploy/providers"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource/plugin"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/tokens"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/result"
+	pulumirpc "github.com/pulumi/pulumi/sdk/v2/proto/go"
 )
 
 // A ProviderSource allows a Source to lookup provider plugins.
@@ -88,9 +88,7 @@ type RegisterResourceEvent interface {
 
 // RegisterResult is the state of the resource after it has been registered.
 type RegisterResult struct {
-	State   *resource.State        // the resource state.
-	Stable  bool                   // if true, the resource state is stable and may be trusted.
-	Stables []resource.PropertyKey // an optional list of specific resource properties that are stable.
+	State *resource.State // the resource state.
 }
 
 // RegisterResourceOutputsEvent is an event that asks the engine to complete the provisioning of a resource.

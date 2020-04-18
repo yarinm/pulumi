@@ -22,14 +22,14 @@ import (
 	"github.com/pkg/errors"
 	uuid "github.com/satori/go.uuid"
 
-	"github.com/pulumi/pulumi/pkg/diag"
-	"github.com/pulumi/pulumi/pkg/resource"
-	"github.com/pulumi/pulumi/pkg/resource/deploy/providers"
-	"github.com/pulumi/pulumi/pkg/resource/graph"
-	"github.com/pulumi/pulumi/pkg/resource/plugin"
-	"github.com/pulumi/pulumi/pkg/tokens"
-	"github.com/pulumi/pulumi/pkg/util/contract"
-	"github.com/pulumi/pulumi/pkg/util/result"
+	"github.com/pulumi/pulumi/pkg/v2/resource/deploy/providers"
+	"github.com/pulumi/pulumi/pkg/v2/resource/graph"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/diag"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource/plugin"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/tokens"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/contract"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/result"
 )
 
 // BackendClient provides an interface for retrieving information about other stacks.
@@ -52,8 +52,10 @@ type Options struct {
 	Refresh           bool           // whether or not to refresh before executing the plan.
 	RefreshOnly       bool           // whether or not to exit after refreshing.
 	RefreshTargets    []resource.URN // The specific resources to refresh during a refresh op.
+	ReplaceTargets    []resource.URN // Specific resources to replace.
 	DestroyTargets    []resource.URN // Specific resources to destroy.
 	UpdateTargets     []resource.URN // Specific resources to update.
+	TargetDependents  bool           // true if we're allowing things to proceed, even with unspecified targets
 	TrustDependencies bool           // whether or not to trust the resource dependency graph.
 	UseLegacyDiff     bool           // whether or not to use legacy diffing behavior.
 }

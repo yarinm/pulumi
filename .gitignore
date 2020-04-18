@@ -1,12 +1,15 @@
 *.swp
-/vendor/
+**/vendor/
 **/node_modules/
 **/bin
 **/.vscode/
+**/.vs/
+**/.ionide/
+**/.idea/
 coverage.cov
 *.coverprofile
 
-/.idea/
+**/.idea/
 *.iml
 
 # VSCode creates this binary when running tests in the debugger
@@ -18,3 +21,5 @@ coverage.cov
 
 # By default, we don't check in yarn.lock files
 **/yarn.lock
+
+.mypy_cache

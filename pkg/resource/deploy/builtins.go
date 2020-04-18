@@ -7,11 +7,11 @@ import (
 	"github.com/pkg/errors"
 	uuid "github.com/satori/go.uuid"
 
-	"github.com/pulumi/pulumi/pkg/resource"
-	"github.com/pulumi/pulumi/pkg/resource/plugin"
-	"github.com/pulumi/pulumi/pkg/tokens"
-	"github.com/pulumi/pulumi/pkg/util/contract"
-	"github.com/pulumi/pulumi/pkg/workspace"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource/plugin"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/tokens"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/contract"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/workspace"
 )
 
 type builtinProvider struct {
@@ -35,6 +35,11 @@ func (p *builtinProvider) Close() error {
 
 func (p *builtinProvider) Pkg() tokens.Package {
 	return "pulumi"
+}
+
+// GetSchema returns the JSON-serialized schema for the provider.
+func (p *builtinProvider) GetSchema(version int) ([]byte, error) {
+	return []byte("{}"), nil
 }
 
 // CheckConfig validates the configuration for this resource provider.
@@ -142,20 +147,35 @@ func (p *builtinProvider) Read(urn resource.URN, id resource.ID,
 	}, resource.StatusOK, nil
 }
 
+const readStackOutputs = "pulumi:pulumi:readStackOutputs"
 const readStackResourceOutputs = "pulumi:pulumi:readStackResourceOutputs"
 
 func (p *builtinProvider) Invoke(tok tokens.ModuleMember,
 	args resource.PropertyMap) (resource.PropertyMap, []plugin.CheckFailure, error) {
-	if tok != readStackResourceOutputs {
+
+	switch tok {
+	case readStackOutputs:
+		outs, err := p.readStackReference(args)
+		if err != nil {
+			return nil, nil, err
+		}
+		return outs, nil, nil
+	case readStackResourceOutputs:
+		outs, err := p.readStackResourceOutputs(args)
+		if err != nil {
+			return nil, nil, err
+		}
+		return outs, nil, nil
+	default:
 		return nil, nil, errors.Errorf("unrecognized function name: '%v'", tok)
 	}
+}
 
-	outs, err := p.readStackResourceOutputs(args)
-	if err != nil {
-		return nil, nil, err
-	}
+func (p *builtinProvider) StreamInvoke(
+	tok tokens.ModuleMember, args resource.PropertyMap,
+	onNext func(resource.PropertyMap) error) ([]plugin.CheckFailure, error) {
 
-	return outs, nil, nil
+	return nil, fmt.Errorf("the builtin provider does not implement streaming invokes")
 }
 
 func (p *builtinProvider) GetPluginInfo() (workspace.PluginInfo, error) {

@@ -21,16 +21,16 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/pulumi/pulumi/pkg/apitype"
-	"github.com/pulumi/pulumi/pkg/engine"
-	"github.com/pulumi/pulumi/pkg/operations"
-	"github.com/pulumi/pulumi/pkg/resource/config"
-	"github.com/pulumi/pulumi/pkg/resource/deploy"
-	"github.com/pulumi/pulumi/pkg/tokens"
-	"github.com/pulumi/pulumi/pkg/util/contract"
-	"github.com/pulumi/pulumi/pkg/util/gitutil"
-	"github.com/pulumi/pulumi/pkg/util/result"
-	"github.com/pulumi/pulumi/pkg/workspace"
+	"github.com/pulumi/pulumi/pkg/v2/engine"
+	"github.com/pulumi/pulumi/pkg/v2/operations"
+	"github.com/pulumi/pulumi/pkg/v2/resource/deploy"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/apitype"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource/config"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/tokens"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/contract"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/gitutil"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/result"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/workspace"
 )
 
 // Stack is a stack associated with a particular backend implementation.
@@ -47,9 +47,9 @@ type Stack interface {
 	Refresh(ctx context.Context, op UpdateOperation) (engine.ResourceChanges, result.Result)
 	// Destroy this stack's resources.
 	Destroy(ctx context.Context, op UpdateOperation) (engine.ResourceChanges, result.Result)
+	// Watch this stack.
+	Watch(ctx context.Context, op UpdateOperation) result.Result
 
-	// Query this stack's state.
-	Query(ctx context.Context, op UpdateOperation) result.Result
 	// remove this stack.
 	Remove(ctx context.Context, force bool) (bool, error)
 	// rename this stack.
@@ -62,16 +62,12 @@ type Stack interface {
 	ImportDeployment(ctx context.Context, deployment *apitype.UntypedDeployment) error
 }
 
-// Query executes a query program against a stack's resource outputs.
-func Query(ctx context.Context, s Stack, op UpdateOperation) result.Result {
-	return s.Backend().Query(ctx, s, op)
-}
-
 // RemoveStack returns the stack, or returns an error if it cannot.
 func RemoveStack(ctx context.Context, s Stack, force bool) (bool, error) {
 	return s.Backend().RemoveStack(ctx, s, force)
 }
 
+// RenameStack renames the stack, or returns an error if it cannot.
 func RenameStack(ctx context.Context, s Stack, newName tokens.QName) error {
 	return s.Backend().RenameStack(ctx, s, newName)
 }
@@ -94,6 +90,12 @@ func RefreshStack(ctx context.Context, s Stack, op UpdateOperation) (engine.Reso
 // DestroyStack destroys all of this stack's resources.
 func DestroyStack(ctx context.Context, s Stack, op UpdateOperation) (engine.ResourceChanges, result.Result) {
 	return s.Backend().Destroy(ctx, s, op)
+}
+
+// WatchStack watches the projects working directory for changes and automatically updates the
+// active stack.
+func WatchStack(ctx context.Context, s Stack, op UpdateOperation) result.Result {
+	return s.Backend().Watch(ctx, s, op)
 }
 
 // GetLatestConfiguration returns the configuration for the most recent deployment of the stack.

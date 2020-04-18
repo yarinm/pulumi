@@ -3,6 +3,7 @@ package httpstate
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -11,40 +12,55 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pulumi/pulumi/pkg/util/archive"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/archive"
 
-	"github.com/pulumi/pulumi/pkg/npm"
+	"github.com/pulumi/pulumi/pkg/v2/npm"
 
 	"github.com/pkg/errors"
-	"github.com/pulumi/pulumi/pkg/apitype"
-	"github.com/pulumi/pulumi/pkg/backend"
-	"github.com/pulumi/pulumi/pkg/backend/httpstate/client"
-	"github.com/pulumi/pulumi/pkg/engine"
-	"github.com/pulumi/pulumi/pkg/tokens"
-	"github.com/pulumi/pulumi/pkg/util/contract"
-	"github.com/pulumi/pulumi/pkg/util/result"
-	"github.com/pulumi/pulumi/pkg/workspace"
+	"github.com/pulumi/pulumi/pkg/v2/backend"
+	"github.com/pulumi/pulumi/pkg/v2/backend/httpstate/client"
+	"github.com/pulumi/pulumi/pkg/v2/engine"
+	resourceanalyzer "github.com/pulumi/pulumi/pkg/v2/resource/analyzer"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/apitype"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/tokens"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/contract"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/result"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/workspace"
 )
 
 type cloudRequiredPolicy struct {
 	apitype.RequiredPolicy
-	client *client.Client
+	client  *client.Client
+	orgName string
 }
 
 var _ engine.RequiredPolicy = (*cloudRequiredPolicy)(nil)
 
-func newCloudRequiredPolicy(client *client.Client, policy apitype.RequiredPolicy) *cloudRequiredPolicy {
-	return &cloudRequiredPolicy{client: client, RequiredPolicy: policy}
+func newCloudRequiredPolicy(client *client.Client,
+	policy apitype.RequiredPolicy, orgName string) *cloudRequiredPolicy {
+
+	return &cloudRequiredPolicy{
+		client:         client,
+		RequiredPolicy: policy,
+		orgName:        orgName,
+	}
 }
 
 func (rp *cloudRequiredPolicy) Name() string    { return rp.RequiredPolicy.Name }
 func (rp *cloudRequiredPolicy) Version() string { return strconv.Itoa(rp.RequiredPolicy.Version) }
+func (rp *cloudRequiredPolicy) OrgName() string { return rp.orgName }
 
 func (rp *cloudRequiredPolicy) Install(ctx context.Context) (string, error) {
 	policy := rp.RequiredPolicy
 
-	policyPackPath, installed, err := workspace.GetPolicyPath(
-		strings.Replace(policy.Name, tokens.QNameDelimiter, "_", -1), strconv.Itoa(policy.Version))
+	// If version tag is empty, we use the version tag. This is to support older version of
+	// pulumi/policy that do not have a version tag.
+	version := policy.VersionTag
+	if version == "" {
+		version = strconv.Itoa(policy.Version)
+	}
+	policyPackPath, installed, err := workspace.GetPolicyPath(rp.OrgName(),
+		strings.Replace(policy.Name, tokens.QNameDelimiter, "_", -1), version)
 	if err != nil {
 		// Failed to get a sensible PolicyPack path.
 		return "", err
@@ -62,10 +78,16 @@ func (rp *cloudRequiredPolicy) Install(ctx context.Context) (string, error) {
 	return policyPackPath, installRequiredPolicy(policyPackPath, policyPackTarball)
 }
 
-func newCloudBackendPolicyPackReference(
-	orgName string, name tokens.QName) *cloudBackendPolicyPackReference {
+func (rp *cloudRequiredPolicy) Config() map[string]*json.RawMessage { return rp.RequiredPolicy.Config }
 
-	return &cloudBackendPolicyPackReference{orgName: orgName, name: name}
+func newCloudBackendPolicyPackReference(
+	cloudConsoleURL, orgName string, name tokens.QName) *cloudBackendPolicyPackReference {
+
+	return &cloudBackendPolicyPackReference{
+		orgName:         orgName,
+		name:            name,
+		cloudConsoleURL: cloudConsoleURL,
+	}
 }
 
 // cloudBackendPolicyPackReference is a reference to a PolicyPack implemented by the Pulumi service.
@@ -74,6 +96,14 @@ type cloudBackendPolicyPackReference struct {
 	name tokens.QName
 	// orgName that administrates the PolicyPack.
 	orgName string
+
+	// versionTag of the Policy Pack. This is typically the version specified in
+	// a package.json, setup.py, or similar file.
+	versionTag string
+
+	// cloudConsoleURL is the root URL of where the Policy Pack can be found in the console. The
+	// version must be appended to the returned URL.
+	cloudConsoleURL string
 }
 
 var _ backend.PolicyPackReference = (*cloudBackendPolicyPackReference)(nil)
@@ -88,6 +118,10 @@ func (pr *cloudBackendPolicyPackReference) OrgName() string {
 
 func (pr *cloudBackendPolicyPackReference) Name() tokens.QName {
 	return pr.name
+}
+
+func (pr *cloudBackendPolicyPackReference) CloudConsoleURL() string {
+	return fmt.Sprintf("%s/%s/policypacks/%s", pr.cloudConsoleURL, pr.orgName, pr.Name())
 }
 
 // cloudPolicyPack is a the Pulumi service implementation of the PolicyPack interface.
@@ -119,7 +153,12 @@ func (pack *cloudPolicyPack) Publish(
 
 	fmt.Println("Obtaining policy metadata from policy plugin")
 
-	analyzer, err := op.PlugCtx.Host.PolicyAnalyzer(pack.Ref().Name(), op.PlugCtx.Pwd)
+	abs, err := filepath.Abs(op.PlugCtx.Pwd)
+	if err != nil {
+		return result.FromError(err)
+	}
+
+	analyzer, err := op.PlugCtx.Host.PolicyAnalyzer(tokens.QName(abs), op.PlugCtx.Pwd, nil /*opts*/)
 	if err != nil {
 		return result.FromError(err)
 	}
@@ -129,7 +168,9 @@ func (pack *cloudPolicyPack) Publish(
 		return result.FromError(err)
 	}
 
-	analyzerInfo.Name = string(pack.ref.name)
+	// Update the name and version tag from the metadata.
+	pack.ref.name = tokens.QName(analyzerInfo.Name)
+	pack.ref.versionTag = analyzerInfo.Version
 
 	fmt.Println("Compressing policy pack")
 
@@ -150,18 +191,50 @@ func (pack *cloudPolicyPack) Publish(
 	// Publish.
 	//
 
-	fmt.Println("Uploading policy pack to Pulumi service")
+	fmt.Println("Uploading Policy Pack to Pulumi service")
 
-	err = pack.cl.PublishPolicyPack(ctx, pack.ref.orgName, analyzerInfo, bytes.NewReader(packTarball))
+	publishedVersion, err := pack.cl.PublishPolicyPack(ctx, pack.ref.orgName, analyzerInfo, bytes.NewReader(packTarball))
 	if err != nil {
 		return result.FromError(err)
 	}
 
+	fmt.Printf("\nPermalink: %s/%s\n", pack.ref.CloudConsoleURL(), publishedVersion)
+
 	return nil
 }
 
-func (pack *cloudPolicyPack) Apply(ctx context.Context, op backend.ApplyOperation) error {
-	return pack.cl.ApplyPolicyPack(ctx, pack.ref.orgName, string(pack.ref.name), op.Version)
+func (pack *cloudPolicyPack) Enable(ctx context.Context, policyGroup string, op backend.PolicyPackOperation) error {
+	if op.VersionTag == nil {
+		return pack.cl.ApplyPolicyPack(ctx, pack.ref.orgName, policyGroup, string(pack.ref.name),
+			"" /* versionTag */, op.Config)
+	}
+	return pack.cl.ApplyPolicyPack(ctx, pack.ref.orgName, policyGroup, string(pack.ref.name), *op.VersionTag, op.Config)
+}
+
+func (pack *cloudPolicyPack) Validate(ctx context.Context, op backend.PolicyPackOperation) error {
+	schema, err := pack.cl.GetPolicyPackSchema(ctx, pack.ref.orgName, string(pack.ref.name), *op.VersionTag)
+	if err != nil {
+		return err
+	}
+	err = resourceanalyzer.ValidatePolicyPackConfig(schema.ConfigSchema, op.Config)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (pack *cloudPolicyPack) Disable(ctx context.Context, policyGroup string, op backend.PolicyPackOperation) error {
+	if op.VersionTag == nil {
+		return pack.cl.DisablePolicyPack(ctx, pack.ref.orgName, policyGroup, string(pack.ref.name), "" /* versionTag */)
+	}
+	return pack.cl.DisablePolicyPack(ctx, pack.ref.orgName, policyGroup, string(pack.ref.name), *op.VersionTag)
+}
+
+func (pack *cloudPolicyPack) Remove(ctx context.Context, op backend.PolicyPackOperation) error {
+	if op.VersionTag == nil {
+		return pack.cl.RemovePolicyPack(ctx, pack.ref.orgName, string(pack.ref.name))
+	}
+	return pack.cl.RemovePolicyPackByVersion(ctx, pack.ref.orgName, string(pack.ref.name), *op.VersionTag)
 }
 
 const npmPackageDir = "package"
@@ -218,12 +291,11 @@ func installRequiredPolicy(finalDir string, tarball []byte) error {
 	fmt.Println()
 
 	// TODO[pulumi/pulumi#1307]: move to the language plugins so we don't have to hard code here.
-	err = npm.Install(finalDir, nil, os.Stderr)
-	if err != nil {
+	if bin, err := npm.Install(finalDir, nil, os.Stderr); err != nil {
 		return errors.Wrapf(
 			err,
-			"failed to install dependencies of policy pack; you may need to re-run `npm install` "+
-				"in %q before this policy pack works", finalDir)
+			"failed to install dependencies of policy pack; you may need to re-run `%s install` "+
+				"in %q before this policy pack works", bin, finalDir)
 	}
 
 	fmt.Println("Finished installing dependencies")

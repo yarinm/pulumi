@@ -21,14 +21,14 @@ import (
 
 	"github.com/blang/semver"
 	"github.com/pkg/errors"
-	"github.com/pulumi/pulumi/pkg/apitype"
-	"github.com/pulumi/pulumi/pkg/apitype/migrate"
-	"github.com/pulumi/pulumi/pkg/resource"
-	"github.com/pulumi/pulumi/pkg/resource/config"
-	"github.com/pulumi/pulumi/pkg/resource/deploy"
-	"github.com/pulumi/pulumi/pkg/secrets"
-	"github.com/pulumi/pulumi/pkg/util/contract"
-	"github.com/pulumi/pulumi/pkg/workspace"
+	"github.com/pulumi/pulumi/pkg/v2/resource/deploy"
+	"github.com/pulumi/pulumi/pkg/v2/secrets"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/apitype"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/apitype/migrate"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource/config"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/contract"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/workspace"
 )
 
 const (
@@ -37,6 +37,12 @@ const (
 	// need to be at least one less than the current schema version so that old deployments can
 	// be migrated to the current schema.
 	DeploymentSchemaVersionOldestSupported = 1
+
+	// computedValue is a magic number we emit for a value of a resource.Property value
+	// whenever we need to serialize a resource.Computed. (Since the real/actual value
+	// is not known.) This allows us to persist engine events and resource states that
+	// indicate a value will changed... but is unknown what it will change to.
+	computedValuePlaceholder = "04da6b54-80e4-46f7-96ec-b56ff0331ba9"
 )
 
 var (
@@ -280,6 +286,7 @@ func SerializeResource(res *resource.State, enc config.Encrypter) (apitype.Resou
 		PendingReplacement:      res.PendingReplacement,
 		AdditionalSecretOutputs: res.AdditionalSecretOutputs,
 		Aliases:                 res.Aliases,
+		ImportID:                res.ImportID,
 	}
 
 	if res.CustomTimeouts.IsNotEmpty() {
@@ -308,19 +315,23 @@ func SerializeProperties(props resource.PropertyMap, enc config.Encrypter) (map[
 		if err != nil {
 			return nil, err
 		}
-		if v != nil {
-			dst[string(k)] = v
-		}
+		dst[string(k)] = v
 	}
 	return dst, nil
 }
 
 // SerializePropertyValue serializes a resource property value so that it's suitable for serialization.
 func SerializePropertyValue(prop resource.PropertyValue, enc config.Encrypter) (interface{}, error) {
-	// Skip nulls and "outputs"; the former needn't be serialized, and the latter happens if there is an output
-	// that hasn't materialized (either because we're serializing inputs or the provider didn't give us the value).
-	if prop.IsComputed() || !prop.HasValue() {
+	// Serialize nulls as nil.
+	if prop.IsNull() {
 		return nil, nil
+	}
+
+	// A computed value marks something that will be determined at a later time. (e.g. the result of
+	// a computation that we don't perform during a preview operation.) We serialize a magic constant
+	// to record its existence.
+	if prop.IsComputed() || prop.IsOutput() {
+		return computedValuePlaceholder, nil
 	}
 
 	// For arrays, make sure to recurse.
@@ -400,7 +411,8 @@ func DeserializeResource(res apitype.ResourceV3, dec config.Decrypter) (*resourc
 	return resource.NewState(
 		res.Type, res.URN, res.Custom, res.Delete, res.ID,
 		inputs, outputs, res.Parent, res.Protect, res.External, res.Dependencies, res.InitErrors, res.Provider,
-		res.PropertyDependencies, res.PendingReplacement, res.AdditionalSecretOutputs, res.Aliases, res.CustomTimeouts), nil
+		res.PropertyDependencies, res.PendingReplacement, res.AdditionalSecretOutputs, res.Aliases, res.CustomTimeouts,
+		res.ImportID), nil
 }
 
 func DeserializeOperation(op apitype.OperationV2, dec config.Decrypter) (resource.Operation, error) {
@@ -433,6 +445,9 @@ func DeserializePropertyValue(v interface{}, dec config.Decrypter) (resource.Pro
 		case float64:
 			return resource.NewNumberProperty(w), nil
 		case string:
+			if w == computedValuePlaceholder {
+				return resource.MakeComputed(resource.NewStringProperty("")), nil
+			}
 			return resource.NewStringProperty(w), nil
 		case []interface{}:
 			var arr []resource.PropertyValue

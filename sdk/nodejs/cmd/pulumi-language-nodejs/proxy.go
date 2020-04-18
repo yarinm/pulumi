@@ -24,8 +24,8 @@ import (
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/encoding/proto"
 
-	"github.com/pulumi/pulumi/pkg/util/logging"
-	pulumirpc "github.com/pulumi/pulumi/sdk/proto/go"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/logging"
+	pulumirpc "github.com/pulumi/pulumi/sdk/v2/proto/go"
 )
 
 // pipes is the platform agnostic abstraction over a pair of channels we can read and write binary
@@ -189,6 +189,29 @@ type monitorProxy struct {
 func (p *monitorProxy) Invoke(
 	ctx context.Context, req *pulumirpc.InvokeRequest) (*pulumirpc.InvokeResponse, error) {
 	return p.target.Invoke(ctx, req)
+}
+
+func (p *monitorProxy) StreamInvoke(
+	req *pulumirpc.InvokeRequest, server pulumirpc.ResourceMonitor_StreamInvokeServer) error {
+
+	client, err := p.target.StreamInvoke(context.Background(), req)
+	if err != nil {
+		return err
+	}
+
+	for {
+		in, err := client.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+
+		if err := server.Send(in); err != nil {
+			return err
+		}
+	}
 }
 
 func (p *monitorProxy) ReadResource(

@@ -20,14 +20,14 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/pulumi/pulumi/pkg/diag"
-	"github.com/pulumi/pulumi/pkg/diag/colors"
-	"github.com/pulumi/pulumi/pkg/resource"
-	"github.com/pulumi/pulumi/pkg/resource/deploy/providers"
-	"github.com/pulumi/pulumi/pkg/resource/plugin"
-	"github.com/pulumi/pulumi/pkg/tokens"
-	"github.com/pulumi/pulumi/pkg/util/contract"
-	"github.com/pulumi/pulumi/pkg/util/logging"
+	"github.com/pulumi/pulumi/pkg/v2/resource/deploy/providers"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/diag"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/diag/colors"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource/plugin"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/tokens"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/contract"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/logging"
 )
 
 // StepCompleteFunc is the type of functions returned from Step.Apply. These functions are to be called
@@ -61,6 +61,10 @@ type SameStep struct {
 	reg  RegisterResourceEvent // the registration intent to convey a URN back to.
 	old  *resource.State       // the state of the resource before this step.
 	new  *resource.State       // the state of the resource after this step.
+
+	// If this is a same-step for a resource being created but which was not --target'ed by the user
+	// (and thus was skipped).
+	skippedCreate bool
 }
 
 var _ Step = (*SameStep)(nil)
@@ -84,6 +88,28 @@ func NewSameStep(plan *Plan, reg RegisterResourceEvent, old *resource.State, new
 	}
 }
 
+// NewSkippedCreateStep produces a SameStep for a resource that was created but not targeted
+// by the user (and thus was skipped). These act as no-op steps (hence 'same') since we are not
+// actually creating the resource, but ensure that we complete resource-registration and convey the
+// right information downstream. For example, we will not write these into the checkpoint file.
+func NewSkippedCreateStep(plan *Plan, reg RegisterResourceEvent, new *resource.State) Step {
+	contract.Assert(new != nil)
+	contract.Assert(new.URN != "")
+	contract.Assert(new.ID == "")
+	contract.Assert(!new.Custom || new.Provider != "" || providers.IsProviderType(new.Type))
+	contract.Assert(!new.Delete)
+
+	// Make the old state here a direct copy of the new state
+	old := *new
+	return &SameStep{
+		plan:          plan,
+		reg:           reg,
+		old:           &old,
+		new:           new,
+		skippedCreate: true,
+	}
+}
+
 func (s *SameStep) Op() StepOp           { return OpSame }
 func (s *SameStep) Plan() *Plan          { return s.plan }
 func (s *SameStep) Type() tokens.Type    { return s.new.Type }
@@ -98,8 +124,12 @@ func (s *SameStep) Apply(preview bool) (resource.Status, StepCompleteFunc, error
 	// Retain the ID, and outputs:
 	s.new.ID = s.old.ID
 	s.new.Outputs = s.old.Outputs
-	complete := func() { s.reg.Done(&RegisterResult{State: s.new, Stable: true}) }
+	complete := func() { s.reg.Done(&RegisterResult{State: s.new}) }
 	return resource.StatusOK, complete, nil
+}
+
+func (s *SameStep) IsSkippedCreate() bool {
+	return s.skippedCreate
 }
 
 // CreateStep is a mutating step that creates an entirely new resource.
@@ -208,6 +238,8 @@ func (s *CreateStep) Apply(preview bool) (resource.Status, StepCompleteFunc, err
 			s.new.ID = id
 			s.new.Outputs = outs
 		}
+	} else {
+		s.new.Outputs = s.new.Inputs
 	}
 
 	// Mark the old resource as pending deletion if necessary.
@@ -433,10 +465,12 @@ func (s *UpdateStep) Apply(preview bool) (resource.Status, StepCompleteFunc, err
 			// Now copy any output state back in case the update triggered cascading updates to other properties.
 			s.new.Outputs = outs
 		}
+	} else {
+		s.new.Outputs = s.new.Inputs
 	}
 
 	// Finally, mark this operation as complete.
-	complete := func() { s.reg.Done(&RegisterResult{State: s.new, Stables: s.stables}) }
+	complete := func() { s.reg.Done(&RegisterResult{State: s.new}) }
 	if resourceError == nil {
 		return resourceStatus, complete, nil
 	}
@@ -727,7 +761,7 @@ func (s *RefreshStep) Apply(preview bool) (resource.Status, StepCompleteFunc, er
 		s.new = resource.NewState(s.old.Type, s.old.URN, s.old.Custom, s.old.Delete, resourceID, inputs, outputs,
 			s.old.Parent, s.old.Protect, s.old.External, s.old.Dependencies, initErrors, s.old.Provider,
 			s.old.PropertyDependencies, s.old.PendingReplacement, s.old.AdditionalSecretOutputs, s.old.Aliases,
-			&s.old.CustomTimeouts)
+			&s.old.CustomTimeouts, s.old.ImportID)
 	} else {
 		s.new = nil
 	}
@@ -837,7 +871,7 @@ func (s *ImportStep) Apply(preview bool) (resource.Status, StepCompleteFunc, err
 	// differences between the old and new states are between the inputs and outputs.
 	s.old = resource.NewState(s.new.Type, s.new.URN, s.new.Custom, false, s.new.ID, read.Inputs, read.Outputs,
 		s.new.Parent, s.new.Protect, false, s.new.Dependencies, s.new.InitErrors, s.new.Provider,
-		s.new.PropertyDependencies, false, nil, nil, &s.new.CustomTimeouts)
+		s.new.PropertyDependencies, false, nil, nil, &s.new.CustomTimeouts, s.new.ImportID)
 
 	// Check the user inputs using the provider inputs for defaults.
 	inputs, failures, err := prov.Check(s.new.URN, s.old.Inputs, s.new.Inputs, preview)

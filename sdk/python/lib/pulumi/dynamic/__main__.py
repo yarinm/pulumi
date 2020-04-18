@@ -15,6 +15,7 @@
 import asyncio
 import base64
 from concurrent import futures
+import sys
 import time
 
 import dill
@@ -48,8 +49,8 @@ class DynamicResourceProviderServicer(ResourceProviderServicer):
         raise NotImplementedError("unknown function %s" % request.token)
 
     def Diff(self, request, context):
-        olds = rpc.deserialize_properties(request.olds)
-        news = rpc.deserialize_properties(request.news)
+        olds = rpc.deserialize_properties(request.olds, True)
+        news = rpc.deserialize_properties(request.news, True)
         if news[PROVIDER_KEY] == rpc.UNKNOWN:
             provider = get_provider(olds)
         else:
@@ -112,8 +113,8 @@ class DynamicResourceProviderServicer(ResourceProviderServicer):
         return proto.CreateResponse(**fields)
 
     def Check(self, request, context):
-        olds = rpc.deserialize_properties(request.olds)
-        news = rpc.deserialize_properties(request.news)
+        olds = rpc.deserialize_properties(request.olds, True)
+        news = rpc.deserialize_properties(request.news, True)
         if news[PROVIDER_KEY] == rpc.UNKNOWN:
             provider = get_provider(olds)
         else:
@@ -142,6 +143,11 @@ class DynamicResourceProviderServicer(ResourceProviderServicer):
         fields = {"version": "0.1.0"}
         return proto.PluginInfo(**fields)
 
+    def GetSchema(self, request, context):
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("GetSchema is not implemented by the dynamic provider")
+        raise NotImplementedError("GetSchema is not implemented by the dynamic provider")
+
     def Read(self, request, context):
         id_ = request.id
         props = rpc.deserialize_properties(request.properties)
@@ -166,7 +172,7 @@ def main():
     provider_pb2_grpc.add_ResourceProviderServicer_to_server(monitor, server)
     port = server.add_insecure_port(address="0.0.0.0:0")
     server.start()
-    print(port)
+    sys.stdout.buffer.write(f"{port}\n".encode())
     try:
         while True:
             time.sleep(_ONE_DAY_IN_SECONDS)

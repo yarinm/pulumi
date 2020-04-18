@@ -19,11 +19,12 @@ import * as path from "path";
 import { ID, runtime, URN } from "../../../index";
 import { asyncTest } from "../../util";
 
+import * as grpc from "@grpc/grpc-js";
+
 const enginerpc = require("../../../proto/engine_grpc_pb.js");
 const engineproto = require("../../../proto/engine_pb.js");
 const gempty = require("google-protobuf/google/protobuf/empty_pb.js");
 const gstruct = require("google-protobuf/google/protobuf/struct_pb.js");
-const grpc = require("grpc");
 const langrpc = require("../../../proto/language_grpc_pb.js");
 const langproto = require("../../../proto/language_pb.js");
 const resrpc = require("../../../proto/resource_grpc_pb.js");
@@ -898,6 +899,144 @@ describe("rpc", () => {
                 });
             },
         },
+        "exported_function": {
+            program: path.join(base, "047.exported_function"),
+            expectResourceCount: 1,
+            showRootResourceRegistration: true,
+            registerResource: (ctx, dryrun, t, name, res, deps, custom, protect, parent) => {
+                if (t === "pulumi:pulumi:Stack") {
+                    ctx.stackUrn = makeUrn(t, name);
+                    return { urn: makeUrn(t, name), id: undefined, props: undefined };
+                }
+                throw new Error();
+            },
+            registerResourceOutputs: (ctx: any, dryrun: boolean, urn: URN,
+                                      t: string, name: string, res: any, outputs: any | undefined) => {
+                assert.strictEqual(t, "pulumi:pulumi:Stack");
+                assert.deepEqual(outputs, {
+                    a: {
+                        x: 99,
+                        y: "z",
+                    },
+                    b: 42,
+                    c: {
+                        d: "a",
+                        e: false,
+                    },
+                });
+            },
+        },
+        "exported_promise_function": {
+            program: path.join(base, "048.exported_promise_function"),
+            expectResourceCount: 1,
+            showRootResourceRegistration: true,
+            registerResource: (ctx, dryrun, t, name, res, deps, custom, protect, parent) => {
+                if (t === "pulumi:pulumi:Stack") {
+                    ctx.stackUrn = makeUrn(t, name);
+                    return { urn: makeUrn(t, name), id: undefined, props: undefined };
+                }
+                throw new Error();
+            },
+            registerResourceOutputs: (ctx: any, dryrun: boolean, urn: URN,
+                                      t: string, name: string, res: any, outputs: any | undefined) => {
+                assert.strictEqual(t, "pulumi:pulumi:Stack");
+                assert.deepEqual(outputs, {
+                    a: {
+                        x: 99,
+                        y: "z",
+                    },
+                    b: 42,
+                    c: {
+                        d: "a",
+                        e: false,
+                    },
+                });
+            },
+        },
+        "exported_async_function": {
+            program: path.join(base, "049.exported_async_function"),
+            expectResourceCount: 1,
+            showRootResourceRegistration: true,
+            registerResource: (ctx, dryrun, t, name, res, deps, custom, protect, parent) => {
+                if (t === "pulumi:pulumi:Stack") {
+                    ctx.stackUrn = makeUrn(t, name);
+                    return { urn: makeUrn(t, name), id: undefined, props: undefined };
+                }
+                throw new Error();
+            },
+            registerResourceOutputs: (ctx: any, dryrun: boolean, urn: URN,
+                                      t: string, name: string, res: any, outputs: any | undefined) => {
+                assert.strictEqual(t, "pulumi:pulumi:Stack");
+                assert.deepEqual(outputs, {
+                    a: {
+                        x: 99,
+                        y: "z",
+                    },
+                    b: 42,
+                    c: {
+                        d: "a",
+                        e: false,
+                    },
+                });
+            },
+        },
+        "resource_creation_in_function": {
+            program: path.join(base, "050.resource_creation_in_function"),
+            expectResourceCount: 2,
+            showRootResourceRegistration: true,
+            registerResource: (ctx: any, dryrun: boolean, t: string, name: string, res: any) => {
+                if (t === "pulumi:pulumi:Stack") {
+                    ctx.stackUrn = makeUrn(t, name);
+                    return { urn: makeUrn(t, name), id: undefined, props: undefined };
+                }
+                assert.strictEqual(t, "test:index:MyResource");
+                assert.strictEqual(name, "testResource1");
+                return { urn: makeUrn(t, name), id: undefined, props: undefined };
+            },
+            registerResourceOutputs: (ctx: any, dryrun: boolean, urn: URN,
+                                      t: string, name: string, res: any, outputs: any | undefined) => {
+                assert.strictEqual(t, "pulumi:pulumi:Stack");
+                assert.deepEqual(outputs, {});
+            },
+        },
+        "resource_creation_in_function_with_result": {
+            program: path.join(base, "051.resource_creation_in_function_with_result"),
+            expectResourceCount: 2,
+            showRootResourceRegistration: true,
+            registerResource: (ctx: any, dryrun: boolean, t: string, name: string, res: any) => {
+                if (t === "pulumi:pulumi:Stack") {
+                    ctx.stackUrn = makeUrn(t, name);
+                    return { urn: makeUrn(t, name), id: undefined, props: undefined };
+                }
+                assert.strictEqual(t, "test:index:MyResource");
+                assert.strictEqual(name, "testResource1");
+                return { urn: makeUrn(t, name), id: undefined, props: undefined };
+            },
+            registerResourceOutputs: (ctx: any, dryrun: boolean, urn: URN,
+                                      t: string, name: string, res: any, outputs: any | undefined) => {
+                assert.strictEqual(t, "pulumi:pulumi:Stack");
+                assert.deepEqual(outputs, { a: 1 });
+            },
+        },
+        "resource_creation_in_async_function_with_result": {
+            program: path.join(base, "052.resource_creation_in_async_function_with_result"),
+            expectResourceCount: 2,
+            showRootResourceRegistration: true,
+            registerResource: (ctx: any, dryrun: boolean, t: string, name: string, res: any) => {
+                if (t === "pulumi:pulumi:Stack") {
+                    ctx.stackUrn = makeUrn(t, name);
+                    return { urn: makeUrn(t, name), id: undefined, props: undefined };
+                }
+                assert.strictEqual(t, "test:index:MyResource");
+                assert.strictEqual(name, "testResource1");
+                return { urn: makeUrn(t, name), id: undefined, props: undefined };
+            },
+            registerResourceOutputs: (ctx: any, dryrun: boolean, urn: URN,
+                                      t: string, name: string, res: any, outputs: any | undefined) => {
+                assert.strictEqual(t, "pulumi:pulumi:Stack");
+                assert.deepEqual(outputs, { a: 1 });
+            },
+        },
         "provider_invokes": {
             program: path.join(base, "060.provider_invokes"),
             expectResourceCount: 1,
@@ -980,10 +1119,27 @@ describe("rpc", () => {
                 return { failures: undefined, ret: args };
             },
         },
+        "async_components": {
+            program: path.join(base, "064.async_components"),
+            expectResourceCount: 5,
+            registerResource: (ctx: any, dryrun: boolean, t: string, name: string, res: any, dependencies?: string[],
+                               custom?: boolean, protect?: boolean, parent?: string, provider?: string) => {
+
+                if (name === "c" || name === "d") {
+                    dependencies = dependencies || [];
+                    dependencies.sort();
+                    // resources 'c' and 'd' should see resources 'a' and 'b' as dependencies (even
+                    // though they are async constructed by the component)
+                    assert.deepEqual(dependencies, ["test:index:CustResource::a", "test:index:CustResource::b"]);
+                }
+
+                return { urn: makeUrn(t, name), id: undefined, props: undefined };
+            },
+        },
     };
 
     for (const casename of Object.keys(cases)) {
-        // if (casename.indexOf("provider_in_parent_invokes") < 0) {
+        // if (casename.indexOf("async_components") < 0) {
         //     continue;
         // }
 
@@ -991,7 +1147,7 @@ describe("rpc", () => {
         it(`run test: ${casename} (pwd=${opts.pwd},prog=${opts.program})`, asyncTest(async () => {
             // For each test case, run it twice: first to preview and then to update.
             for (const dryrun of [true, false]) {
-                console.log(dryrun ? "PREVIEW:" : "UPDATE:");
+                // console.log(dryrun ? "PREVIEW:" : "UPDATE:");
 
                 // First we need to mock the resource monitor.
                 const ctx: any = {};
@@ -999,7 +1155,7 @@ describe("rpc", () => {
                 let rootResource: string | undefined;
                 let regCnt = 0;
                 let logCnt = 0;
-                const monitor = createMockEngine(opts,
+                const monitor = await createMockEngineAsync(opts,
                     // Invoke callback
                     (call: any, callback: any) => {
                         const resp = new providerproto.InvokeResponse();
@@ -1176,20 +1332,12 @@ describe("rpc", () => {
                 }
 
                 // Finally, tear down everything so each test case starts anew.
+
                 await new Promise<void>((resolve, reject) => {
                     langHost.proc.kill();
                     langHost.proc.on("close", () => { resolve(); });
                 });
-                await new Promise<void>((resolve, reject) => {
-                    monitor.server.tryShutdown((err: Error) => {
-                        if (err) {
-                            reject(err);
-                        }
-                        else {
-                            resolve();
-                        }
-                    });
-                });
+                monitor.server.forceShutdown();
             }
         }));
     }
@@ -1280,7 +1428,7 @@ function mockRun(langHostClient: any, monitor: string, opts: RunCase, dryrun: bo
 
 // Despite the name, the "engine" RPC endpoint is only a logging endpoint. createMockEngine fires up a fake
 // logging server so tests can assert that certain things get logged.
-function createMockEngine(
+async function createMockEngineAsync(
     opts: RunCase,
     invokeCallback: (call: any, request: any) => any,
     readResourceCallback: (call: any, request: any) => any,
@@ -1289,18 +1437,19 @@ function createMockEngine(
     logCallback: (call: any, request: any) => any,
     getRootResourceCallback: (call: any, request: any) => any,
     setRootResourceCallback: (call: any, request: any) => any,
-    supportsFeatureCallback: (call: any, request: any) => any): { server: any, addr: string } {
+    supportsFeatureCallback: (call: any, request: any) => any) {
     // The resource monitor is hosted in the current process so it can record state, etc.
     const server = new grpc.Server();
     server.addService(resrpc.ResourceMonitorService, {
         supportsFeature: supportsFeatureCallback,
         invoke: invokeCallback,
+        streamInvoke: () => {throw new Error("StreamInvoke not implemented in mock engine"); },
         readResource: readResourceCallback,
         registerResource: registerResourceCallback,
         registerResourceOutputs: registerResourceOutputsCallback,
     });
 
-    let engineImpl: Object = {
+    let engineImpl: grpc.UntypedServiceImplementation = {
         log: logCallback,
     };
 
@@ -1313,8 +1462,19 @@ function createMockEngine(
     }
 
     server.addService(enginerpc.EngineService, engineImpl);
-    const port = server.bind("0.0.0.0:0", grpc.ServerCredentials.createInsecure());
+
+    const port = await new Promise<number>((resolve, reject) => {
+        server.bindAsync("0.0.0.0:0", grpc.ServerCredentials.createInsecure(), (err, p) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve(p);
+            }
+        });
+    });
+
     server.start();
+
     return { server: server, addr: `0.0.0.0:${port}` };
 }
 
@@ -1342,8 +1502,9 @@ function serveLanguageHostProcess(engineAddr: string): { proc: childProcess.Chil
             // The first line is the address; strip off the newline and resolve the promise.
             addrResolve(`0.0.0.0:${dataString}`);
             addrResolve = undefined;
+        } else {
+            console.log(`langhost.stdout: ${dataString}`);
         }
-        console.log(`langhost.stdout: ${dataString}`);
     });
     proc.stderr.on("data", (data) => {
         console.error(`langhost.stderr: ${stripEOL(data)}`);

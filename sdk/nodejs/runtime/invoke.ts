@@ -12,9 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import * as grpc from "@grpc/grpc-js";
 import * as fs from "fs";
-import * as grpc from "grpc";
+
+import { AsyncIterable } from "@pulumi/query/interfaces";
+
 import * as asset from "../asset";
+import { Config } from "../config";
 import { InvokeOptions } from "../invoke";
 import * as log from "../log";
 import { Inputs, Output } from "../output";
@@ -24,6 +28,7 @@ import { excessiveDebugOutput, getMonitor, rpcKeepAlive, SyncInvokes, tryGetSync
 
 import { ProviderResource, Resource } from "../resource";
 import * as utils from "../utils";
+import { PushableAsyncIterable } from "./asyncIterableUtil";
 
 const gstruct = require("google-protobuf/google/protobuf/struct_pb.js");
 const providerproto = require("../proto/provider_pb.js");
@@ -63,25 +68,58 @@ const providerproto = require("../proto/provider_pb.js");
  * synchronously.
  */
 export function invoke(tok: string, props: Inputs, opts: InvokeOptions = {}): Promise<any> {
-    if (opts.async) {
-        // Use specifically requested async invoking.  Respect that.
-        return invokeAsync(tok, props, opts);
-    }
-
-    const syncInvokes = tryGetSyncInvokes();
-    if (!syncInvokes) {
-        // We weren't launched from a pulumi CLI that supports sync-invokes.  Let the user know they
-        // should update and fall back to synchronously blocking on the async invoke.
-        return invokeFallbackToAsync(tok, props, opts);
-    }
-
-    return invokeSync(tok, props, opts, syncInvokes);
+    return invokeAsync(tok, props, opts);
 }
 
-export function invokeFallbackToAsync(tok: string, props: Inputs, opts: InvokeOptions): Promise<any> {
-    const asyncResult = invokeAsync(tok, props, opts);
-    const syncResult = utils.promiseResult(asyncResult);
-    return createLiftedPromise(syncResult);
+export async function streamInvoke(
+    tok: string,
+    props: Inputs,
+    opts: InvokeOptions = {},
+): Promise<StreamInvokeResponse<any>> {
+    const label = `StreamInvoking function: tok=${tok} asynchronously`;
+    log.debug(label + (excessiveDebugOutput ? `, props=${JSON.stringify(props)}` : ``));
+
+    // Wait for all values to be available, and then perform the RPC.
+    const done = rpcKeepAlive();
+    try {
+        const serialized = await serializeProperties(`streamInvoke:${tok}`, props);
+        log.debug(
+            `StreamInvoke RPC prepared: tok=${tok}` + excessiveDebugOutput
+                ? `, obj=${JSON.stringify(serialized)}`
+                : ``,
+        );
+
+        // Fetch the monitor and make an RPC request.
+        const monitor: any = getMonitor();
+
+        const provider = await ProviderResource.register(getProvider(tok, opts));
+        const req = createInvokeRequest(tok, serialized, provider, opts);
+
+        // Call `streamInvoke`.
+        const call = monitor.streamInvoke(req, {});
+
+        const queue = new PushableAsyncIterable();
+        call.on("data", function(thing: any) {
+            const live = deserializeResponse(tok, thing);
+            queue.push(live);
+        });
+        call.on("error", (err: any) => {
+            if (err.code === 1 && err.details === "Cancelled") {
+                return;
+            }
+            throw err;
+        });
+        call.on("end", () => {
+            queue.complete();
+        });
+
+        // Return a cancellable handle to the stream.
+        return new StreamInvokeResponse(
+            queue,
+            () => call.cancel());
+    } finally {
+        done();
+    }
 }
 
 async function invokeAsync(tok: string, props: Inputs, opts: InvokeOptions): Promise<any> {
@@ -128,64 +166,22 @@ async function invokeAsync(tok: string, props: Inputs, opts: InvokeOptions): Pro
     }
 }
 
-function invokeSync(tok: string, props: any, opts: InvokeOptions, syncInvokes: SyncInvokes): Promise<any> {
-    const label = `Invoking function: tok=${tok} synchronously`;
-    log.debug(label + (excessiveDebugOutput ? `, props=${JSON.stringify(props)}` : ``));
+// StreamInvokeResponse represents a (potentially infinite) streaming response to `streamInvoke`,
+// with facilities to gracefully cancel and clean up the stream.
+export class StreamInvokeResponse<T> implements AsyncIterable<T> {
+    constructor(
+        private source: AsyncIterable<T>,
+        private cancelSource: () => void,
+    ) {}
 
-    const serialized = serializePropertiesSync(props);
-    log.debug(`Invoke RPC prepared: tok=${tok}` + excessiveDebugOutput ? `, obj=${JSON.stringify(serialized)}` : ``);
-
-    const providerRef = getProviderRefSync();
-    const req = createInvokeRequest(tok, serialized, providerRef, opts);
-
-    // Encode the request.
-    const reqBytes = Buffer.from(req.serializeBinary());
-
-    // Write the request length.
-    const reqLen = Buffer.alloc(4);
-    reqLen.writeUInt32BE(reqBytes.length, /*offset:*/ 0);
-    fs.writeSync(syncInvokes.requests, reqLen);
-    fs.writeSync(syncInvokes.requests, reqBytes);
-
-    // Read the response.
-    const respLenBytes = Buffer.alloc(4);
-    fs.readSync(syncInvokes.responses, respLenBytes, /*offset:*/ 0, /*length:*/ 4, /*position:*/ null);
-    const respLen = respLenBytes.readUInt32BE(/*offset:*/ 0);
-    const respBytes = Buffer.alloc(respLen);
-    fs.readSync(syncInvokes.responses, respBytes, /*offset:*/ 0, /*length:*/ respLen, /*position:*/ null);
-
-    // Decode the response.
-    const resp = providerproto.InvokeResponse.deserializeBinary(new Uint8Array(respBytes));
-    const resultValue = deserializeResponse(tok, resp);
-
-    return createLiftedPromise(resultValue);
-
-    function getProviderRefSync() {
-        const provider = getProvider(tok, opts);
-
-        if (provider === undefined) {
-            return undefined;
-        }
-
-        if (provider.__registrationId === undefined) {
-            log.warn(
-`Synchronous call made to "${tok}" with an unregistered provider.
-For more details see: https://www.pulumi.com/docs/troubleshooting/#synchronous-call`);
-            utils.promiseResult(ProviderResource.register(provider));
-        }
-
-        return provider.__registrationId;
+    // cancel signals the `streamInvoke` should be cancelled and cleaned up gracefully.
+    public cancel() {
+        this.cancelSource();
     }
-}
 
-// Expose the properties of the actual result of invoke directly on the promise itself. Note this
-// doesn't actually involve any asynchrony.  The promise will be created synchronously and the
-// values copied to it can be used immediately.  We simply make a Promise so that any consumers that
-// do a `.then()` on it continue to work even though we've switched from being async to sync.
-function createLiftedPromise(value: any): Promise<any> {
-    const promise = Promise.resolve(value);
-    Object.assign(promise, value);
-    return promise;
+    [Symbol.asyncIterator]() {
+        return this.source[Symbol.asyncIterator]();
+    }
 }
 
 function createInvokeRequest(tok: string, serialized: any, provider: string | undefined, opts: InvokeOptions) {
@@ -208,58 +204,7 @@ function getProvider(tok: string, opts: InvokeOptions) {
            opts.parent ? opts.parent.getProvider(tok) : undefined;
 }
 
-function serializePropertiesSync(prop: any): any {
-    if (prop === undefined ||
-        prop === null ||
-        typeof prop === "boolean" ||
-        typeof prop === "number" ||
-        typeof prop === "string") {
-
-        return prop;
-    }
-
-    if (asset.Asset.isInstance(prop) || asset.Archive.isInstance(prop)) {
-        throw new Error("Assets and Archives cannot be passed in as arguments to a data source call.");
-    }
-
-    if (prop instanceof Promise) {
-        throw new Error("Promises cannot be passed in as arguments to a data source call.");
-    }
-
-    if (Output.isInstance(prop)) {
-        throw new Error("Outputs cannot be passed in as arguments to a data source call.");
-    }
-
-    if (Resource.isInstance(prop)) {
-        throw new Error("Resources cannot be passed in as arguments to a data source call.");
-    }
-
-    if (prop instanceof Array) {
-        const result: any[] = [];
-        for (let i = 0; i < prop.length; i++) {
-            // When serializing arrays, we serialize any undefined values as `null`. This matches JSON semantics.
-            const elem = serializePropertiesSync(prop[i]);
-            result.push(elem === undefined ? null : elem);
-        }
-        return result;
-    }
-
-    return serializeAllKeys(prop, {});
-
-    function serializeAllKeys(innerProp: any, obj: any) {
-        for (const k of Object.keys(innerProp)) {
-            // When serializing an object, we omit any keys with undefined values. This matches JSON semantics.
-            const v = serializePropertiesSync(innerProp[k]);
-            if (v !== undefined) {
-                obj[k] = v;
-            }
-        }
-
-        return obj;
-    }
-}
-
-function deserializeResponse(tok: string, resp: any) {
+function deserializeResponse(tok: string, resp: any): any {
     const failures: any = resp.getFailuresList();
     if (failures && failures.length) {
         let reasons = "";
@@ -274,5 +219,8 @@ function deserializeResponse(tok: string, resp: any) {
         throw new Error(`Invoke of '${tok}' failed: ${reasons}`);
     }
 
-    return deserializeProperties(resp.getReturn());
+    const ret = resp.getReturn();
+    return ret === undefined
+        ? ret
+        : deserializeProperties(ret);
 }

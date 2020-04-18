@@ -17,14 +17,14 @@ package backend
 import (
 	"context"
 
-	"github.com/pulumi/pulumi/pkg/apitype"
-	"github.com/pulumi/pulumi/pkg/diag"
-	"github.com/pulumi/pulumi/pkg/engine"
-	"github.com/pulumi/pulumi/pkg/operations"
-	"github.com/pulumi/pulumi/pkg/resource/config"
-	"github.com/pulumi/pulumi/pkg/resource/deploy"
-	"github.com/pulumi/pulumi/pkg/tokens"
-	"github.com/pulumi/pulumi/pkg/util/result"
+	"github.com/pulumi/pulumi/pkg/v2/engine"
+	"github.com/pulumi/pulumi/pkg/v2/operations"
+	"github.com/pulumi/pulumi/pkg/v2/resource/deploy"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/apitype"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/diag"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource/config"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/tokens"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/result"
 )
 
 //
@@ -37,6 +37,7 @@ type MockBackend struct {
 	GetPolicyPackF          func(ctx context.Context, policyPack string, d diag.Sink) (PolicyPack, error)
 	SupportsOrganizationsF  func() bool
 	ParseStackReferenceF    func(s string) (StackReference, error)
+	ValidateStackNameF      func(s string) error
 	DoesProjectExistF       func(context.Context, string) (bool, error)
 	GetStackF               func(context.Context, StackReference) (Stack, error)
 	CreateStackF            func(context.Context, StackReference, interface{}) (Stack, error)
@@ -44,7 +45,7 @@ type MockBackend struct {
 	ListStacksF             func(context.Context, ListStacksFilter) ([]StackSummary, error)
 	RenameStackF            func(context.Context, Stack, tokens.QName) error
 	GetStackCrypterF        func(StackReference) (config.Crypter, error)
-	QueryF                  func(context.Context, Stack, UpdateOperation) result.Result
+	QueryF                  func(context.Context, QueryOperation) result.Result
 	GetLatestConfigurationF func(context.Context, Stack) (config.Map, error)
 	GetHistoryF             func(context.Context, StackReference) ([]UpdateInfo, error)
 	GetStackTagsF           func(context.Context, Stack) (map[apitype.StackTagName]string, error)
@@ -61,6 +62,8 @@ type MockBackend struct {
 		UpdateOperation) (engine.ResourceChanges, result.Result)
 	DestroyF func(context.Context, Stack,
 		UpdateOperation) (engine.ResourceChanges, result.Result)
+	WatchF func(context.Context, Stack,
+		UpdateOperation) result.Result
 	GetLogsF func(context.Context, Stack, StackConfiguration,
 		operations.LogQuery) ([]operations.LogEntry, error)
 }
@@ -78,6 +81,14 @@ func (be *MockBackend) URL() string {
 	if be.URLF != nil {
 		return be.URLF()
 	}
+	panic("not implemented")
+}
+
+func (be *MockBackend) ListPolicyGroups(context.Context, string) (apitype.ListPolicyGroupsResponse, error) {
+	panic("not implemented")
+}
+
+func (be *MockBackend) ListPolicyPacks(context.Context, string) (apitype.ListPolicyPacksResponse, error) {
 	panic("not implemented")
 }
 
@@ -100,6 +111,13 @@ func (be *MockBackend) SupportsOrganizations() bool {
 func (be *MockBackend) ParseStackReference(s string) (StackReference, error) {
 	if be.ParseStackReferenceF != nil {
 		return be.ParseStackReferenceF(s)
+	}
+	panic("not implemented")
+}
+
+func (be *MockBackend) ValidateStackName(s string) error {
+	if be.ValidateStackNameF != nil {
+		return be.ValidateStackNameF(s)
 	}
 	panic("not implemented")
 }
@@ -189,11 +207,19 @@ func (be *MockBackend) Destroy(ctx context.Context, stack Stack,
 	panic("not implemented")
 }
 
-func (be *MockBackend) Query(ctx context.Context, stack Stack,
+func (be *MockBackend) Watch(ctx context.Context, stack Stack,
 	op UpdateOperation) result.Result {
 
+	if be.WatchF != nil {
+		return be.WatchF(ctx, stack, op)
+	}
+	panic("not implemented")
+}
+
+func (be *MockBackend) Query(ctx context.Context, op QueryOperation) result.Result {
+
 	if be.QueryF != nil {
-		return be.QueryF(ctx, stack, op)
+		return be.QueryF(ctx, op)
 	}
 	panic("not implemented")
 }
@@ -286,6 +312,7 @@ type MockStack struct {
 	UpdateF   func(ctx context.Context, op UpdateOperation) (engine.ResourceChanges, result.Result)
 	RefreshF  func(ctx context.Context, op UpdateOperation) (engine.ResourceChanges, result.Result)
 	DestroyF  func(ctx context.Context, op UpdateOperation) (engine.ResourceChanges, result.Result)
+	WatchF    func(ctx context.Context, op UpdateOperation) result.Result
 	QueryF    func(ctx context.Context, op UpdateOperation) result.Result
 	RemoveF   func(ctx context.Context, force bool) (bool, error)
 	RenameF   func(ctx context.Context, newName tokens.QName) error
@@ -349,6 +376,13 @@ func (ms *MockStack) Refresh(ctx context.Context, op UpdateOperation) (engine.Re
 func (ms *MockStack) Destroy(ctx context.Context, op UpdateOperation) (engine.ResourceChanges, result.Result) {
 	if ms.DestroyF != nil {
 		return ms.DestroyF(ctx, op)
+	}
+	panic("not implemented")
+}
+
+func (ms *MockStack) Watch(ctx context.Context, op UpdateOperation) result.Result {
+	if ms.WatchF != nil {
+		return ms.WatchF(ctx, op)
 	}
 	panic("not implemented")
 }

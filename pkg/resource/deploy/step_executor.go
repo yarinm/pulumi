@@ -21,10 +21,10 @@ import (
 	"sync/atomic"
 
 	"github.com/pkg/errors"
-	"github.com/pulumi/pulumi/pkg/diag"
-	"github.com/pulumi/pulumi/pkg/resource"
-	"github.com/pulumi/pulumi/pkg/util/contract"
-	"github.com/pulumi/pulumi/pkg/util/logging"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/diag"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/contract"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/logging"
 )
 
 const (
@@ -182,7 +182,7 @@ func (se *stepExecutor) ExecuteRegisterResourceOutputs(e RegisterResourceOutputs
 	e.Done()
 }
 
-// Errored returnes whether or not this step executor saw a step whose execution ended in failure.
+// Errored returns whether or not this step executor saw a step whose execution ended in failure.
 func (se *stepExecutor) Errored() bool {
 	return se.sawError.Load().(bool)
 }

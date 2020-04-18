@@ -15,17 +15,18 @@
 package providers
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/blang/semver"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/pulumi/pulumi/pkg/diag"
-	"github.com/pulumi/pulumi/pkg/resource"
-	"github.com/pulumi/pulumi/pkg/resource/plugin"
-	"github.com/pulumi/pulumi/pkg/tokens"
-	"github.com/pulumi/pulumi/pkg/workspace"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/diag"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource/plugin"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/tokens"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/workspace"
 )
 
 type testPluginHost struct {
@@ -53,7 +54,8 @@ func (host *testPluginHost) LogStatus(sev diag.Severity, urn resource.URN, msg s
 func (host *testPluginHost) Analyzer(nm tokens.QName) (plugin.Analyzer, error) {
 	return nil, errors.New("unsupported")
 }
-func (host *testPluginHost) PolicyAnalyzer(name tokens.QName, path string) (plugin.Analyzer, error) {
+func (host *testPluginHost) PolicyAnalyzer(name tokens.QName, path string,
+	opts *plugin.PolicyAnalyzerOptions) (plugin.Analyzer, error) {
 	return nil, errors.New("unsupported")
 }
 func (host *testPluginHost) ListAnalyzers() []plugin.Analyzer {
@@ -98,6 +100,9 @@ func (prov *testProvider) Close() error {
 func (prov *testProvider) Pkg() tokens.Package {
 	return prov.pkg
 }
+func (prov *testProvider) GetSchema(version int) ([]byte, error) {
+	return []byte("{}"), nil
+}
 func (prov *testProvider) CheckConfig(urn resource.URN, olds,
 	news resource.PropertyMap, allowUnknowns bool) (resource.PropertyMap, []plugin.CheckFailure, error) {
 	return prov.checkConfig(urn, olds, news, allowUnknowns)
@@ -141,6 +146,12 @@ func (prov *testProvider) Delete(urn resource.URN,
 func (prov *testProvider) Invoke(tok tokens.ModuleMember,
 	args resource.PropertyMap) (resource.PropertyMap, []plugin.CheckFailure, error) {
 	return nil, nil, errors.New("unsupported")
+}
+func (prov *testProvider) StreamInvoke(
+	tok tokens.ModuleMember, args resource.PropertyMap,
+	onNext func(resource.PropertyMap) error) ([]plugin.CheckFailure, error) {
+
+	return nil, fmt.Errorf("not implemented")
 }
 func (prov *testProvider) GetPluginInfo() (workspace.PluginInfo, error) {
 	return workspace.PluginInfo{
@@ -473,7 +484,7 @@ func TestCRUD(t *testing.T) {
 		// Diff
 		diff, err := r.Diff(urn, id, olds, news, false, nil)
 		assert.NoError(t, err)
-		assert.Equal(t, plugin.DiffResult{}, diff)
+		assert.Equal(t, plugin.DiffResult{Changes: plugin.DiffNone}, diff)
 
 		// The old provider should still be registered.
 		p2, ok := r.GetProvider(Reference{urn: urn, id: id})
@@ -602,13 +613,13 @@ func TestCRUDPreview(t *testing.T) {
 		// Diff
 		diff, err := r.Diff(urn, id, olds, news, false, nil)
 		assert.NoError(t, err)
-		assert.Equal(t, plugin.DiffResult{}, diff)
+		assert.Equal(t, plugin.DiffResult{Changes: plugin.DiffNone}, diff)
 
-		// The new provider should be registered.
+		// The original provider should be used because the config did not change.
 		p2, ok := r.GetProvider(Reference{urn: urn, id: id})
 		assert.True(t, ok)
-		assert.False(t, p2 == old)
-		assert.True(t, p2 == p)
+		assert.True(t, p2 == old)
+		assert.False(t, p2 == p)
 	}
 
 	// Replace the existing provider for the last entry in olds.

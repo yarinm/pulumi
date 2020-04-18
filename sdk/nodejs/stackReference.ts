@@ -14,7 +14,6 @@
 
 import { all, Input, Output, output } from "./output";
 import { CustomResource, CustomResourceOptions } from "./resource";
-import { promiseResult } from "./utils";
 
 /**
  * Manages a reference to a Pulumi stack. The referenced stack's outputs are available via the
@@ -48,11 +47,13 @@ export class StackReference extends CustomResource {
     constructor(name: string, args?: StackReferenceArgs, opts?: CustomResourceOptions) {
         args = args || {};
 
+        const stackReferenceName = args.name || name;
+
         super("pulumi:pulumi:StackReference", name, {
-            name: args.name || name,
+            name: stackReferenceName,
             outputs: undefined,
             secretOutputNames: undefined,
-        }, { ...opts, id: args.name || name });
+        }, { ...opts, id: stackReferenceName });
     }
 
     /**
@@ -61,11 +62,17 @@ export class StackReference extends CustomResource {
      * @param name The name of the stack output to fetch.
      */
     public getOutput(name: Input<string>): Output<any> {
-        // Note that this is subltly different from "apply" here. A default "apply" will set the secret bit if any
+        // Note that this is subtly different from "apply" here. A default "apply" will set the secret bit if any
         // of the inputs are a secret, and this.outputs is always a secret if it contains any secrets. We do this dance
         // so we can ensure that the Output we return is not needlessly tainted as a secret.
         const value = all([output(name), this.outputs]).apply(([n, os]) => os[n]);
-        return new Output(value.resources(), value.promise(), value.isKnown, isSecretOutputName(this, output(name)));
+
+        // 'value' is an Output produced by our own `.apply` implementation.  So it's safe to
+        // `.allResources!` on it.
+        return new Output(
+            value.resources(), value.promise(),
+            value.isKnown, isSecretOutputName(this, output(name)),
+            value.allResources!());
     }
 
     /**
@@ -80,46 +87,55 @@ export class StackReference extends CustomResource {
             }
             return os[n];
         });
-        return new Output(value.resources(), value.promise(), value.isKnown, isSecretOutputName(this, output(name)));
+        return new Output(
+            value.resources(), value.promise(),
+            value.isKnown, isSecretOutputName(this, output(name)),
+            value.allResources!());
     }
 
     /**
-     * Fetches the value promptly of the named stack output.  May return undefined if the value is
+     * Fetches the value promptly of the named stack output. May return undefined if the value is
      * not known for some reason.
      *
-     * This operation is not supported (and will throw) if any exported values of the StackReference
-     * are secrets.
+     * This operation is not supported (and will throw) if the named stack output is a secret.
      *
      * @param name The name of the stack output to fetch.
      */
-    public getOutputSync(name: string): any {
-        const out = this.getOutput(name);
-        const isSecret = promiseResult(out.isSecret);
+    public async getOutputValue(name: string): Promise<any> {
+        const [out, isSecret] = await this.readOutputValue("getOutputValue", name, false /*required*/);
         if (isSecret) {
-            throw new Error("Cannot call 'getOutputSync' if the referenced stack has secret outputs. Use 'getOutput' instead.");
+            throw new Error("Cannot call 'getOutputValue' if the referenced stack output is a secret. Use 'getOutput' instead.");
         }
-
-        return promiseResult(out.promise());
+        return out;
     }
 
     /**
-     * Fetches the value promptly of the named stack output.  Throws an error if the stack output is
+     * Fetches the value promptly of the named stack output. Throws an error if the stack output is
      * not found.
      *
-     * This operation is not supported (and will throw) if any exported values of the StackReference
-     * are secrets.
+     * This operation is not supported (and will throw) if the named stack output is a secret.
      *
      * @param name The name of the stack output to fetch.
      */
-    public requireOutputSync(name: string): any {
-        const out = this.requireOutput(name);
-        const isSecret = promiseResult(out.isSecret);
+    public async requireOutputValue(name: string): Promise<any> {
+        const [out, isSecret] = await this.readOutputValue("requireOutputSync", name, true /*required*/);
         if (isSecret) {
-            throw new Error("Cannot call 'requireOutputSync' if the referenced stack has secret outputs. Use 'requireOutput' instead.");
+            throw new Error("Cannot call 'requireOutputValue' if the referenced stack output is a secret. Use 'requireOutput' instead.");
         }
-
-        return promiseResult(out.promise());
+        return out;
     }
+
+    private async readOutputValue(callerName: string, outputName: string, required: boolean): Promise<[any, boolean]> {
+        const out = required ? this.requireOutput(outputName) : this.getOutput(outputName);
+        return Promise.all([out.promise(), out.isSecret]);
+    }
+}
+
+// Shape of the result that the engine returns to us when we invoke 'pulumi:pulumi:readStackOutputs'
+interface ReadStackOutputsResult {
+    name: string;
+    outputs: Record<string, any>;
+    secretOutputNames: string[];
 }
 
 /**

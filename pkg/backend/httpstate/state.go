@@ -20,20 +20,20 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pulumi/pulumi/pkg/diag"
-	"github.com/pulumi/pulumi/pkg/util/contract"
-	"github.com/pulumi/pulumi/pkg/util/logging"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/diag"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/contract"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/logging"
 
 	"github.com/pkg/errors"
-	"github.com/pulumi/pulumi/pkg/apitype"
-	"github.com/pulumi/pulumi/pkg/backend"
-	"github.com/pulumi/pulumi/pkg/backend/display"
-	"github.com/pulumi/pulumi/pkg/backend/httpstate/client"
-	"github.com/pulumi/pulumi/pkg/engine"
-	"github.com/pulumi/pulumi/pkg/resource/config"
-	"github.com/pulumi/pulumi/pkg/resource/deploy"
-	"github.com/pulumi/pulumi/pkg/resource/stack"
-	"github.com/pulumi/pulumi/pkg/workspace"
+	"github.com/pulumi/pulumi/pkg/v2/backend"
+	"github.com/pulumi/pulumi/pkg/v2/backend/display"
+	"github.com/pulumi/pulumi/pkg/v2/backend/httpstate/client"
+	"github.com/pulumi/pulumi/pkg/v2/engine"
+	"github.com/pulumi/pulumi/pkg/v2/resource/deploy"
+	"github.com/pulumi/pulumi/pkg/v2/resource/stack"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/apitype"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource/config"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/workspace"
 )
 
 type tokenRequest chan<- tokenResponse
@@ -105,9 +105,8 @@ func (ts *tokenSource) GetToken() (string, error) {
 }
 
 type cloudQuery struct {
-	root   string
-	proj   *workspace.Project
-	target *deploy.Target
+	root string
+	proj *workspace.Project
 }
 
 func (q *cloudQuery) GetRoot() string {
@@ -116,10 +115,6 @@ func (q *cloudQuery) GetRoot() string {
 
 func (q *cloudQuery) GetProject() *workspace.Project {
 	return q.proj
-}
-
-func (q *cloudQuery) GetTarget() *deploy.Target {
-	return q.target
 }
 
 // cloudUpdate is an implementation of engine.Update backed by remote state and a local program.
@@ -229,15 +224,10 @@ func (u *cloudUpdate) RecordAndDisplayEvents(
 	// the display and persistence go-routines are finished processing events.
 }
 
-func (b *cloudBackend) newQuery(ctx context.Context, stackRef backend.StackReference,
-	op backend.UpdateOperation) (*cloudQuery, error) {
-	// Construct the query target.
-	target, err := b.getTarget(ctx, stackRef, op.StackConfiguration.Config, op.StackConfiguration.Decrypter)
-	if err != nil {
-		return nil, err
-	}
+func (b *cloudBackend) newQuery(ctx context.Context,
+	op backend.QueryOperation) (engine.QueryInfo, error) {
 
-	return &cloudQuery{root: op.Root, proj: op.Proj, target: target}, nil
+	return &cloudQuery{root: op.Root, proj: op.Proj}, nil
 }
 
 func (b *cloudBackend) newUpdate(ctx context.Context, stackRef backend.StackReference, op backend.UpdateOperation,
@@ -272,7 +262,7 @@ func (b *cloudBackend) newUpdate(ctx context.Context, stackRef backend.StackRefe
 }
 
 func (b *cloudBackend) getSnapshot(ctx context.Context, stackRef backend.StackReference) (*deploy.Snapshot, error) {
-	untypedDeployment, err := b.exportDeployment(ctx, stackRef)
+	untypedDeployment, err := b.exportDeployment(ctx, stackRef, nil /* get latest */)
 	if err != nil {
 		return nil, err
 	}
@@ -287,6 +277,7 @@ func (b *cloudBackend) getSnapshot(ctx context.Context, stackRef backend.StackRe
 
 func (b *cloudBackend) getTarget(ctx context.Context, stackRef backend.StackReference,
 	cfg config.Map, dec config.Decrypter) (*deploy.Target, error) {
+
 	snapshot, err := b.getSnapshot(ctx, stackRef)
 	if err != nil {
 		switch err {

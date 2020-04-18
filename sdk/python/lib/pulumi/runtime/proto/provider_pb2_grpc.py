@@ -17,6 +17,11 @@ class ResourceProviderStub(object):
     Args:
       channel: A grpc.Channel.
     """
+    self.GetSchema = channel.unary_unary(
+        '/pulumirpc.ResourceProvider/GetSchema',
+        request_serializer=provider__pb2.GetSchemaRequest.SerializeToString,
+        response_deserializer=provider__pb2.GetSchemaResponse.FromString,
+        )
     self.CheckConfig = channel.unary_unary(
         '/pulumirpc.ResourceProvider/CheckConfig',
         request_serializer=provider__pb2.CheckRequest.SerializeToString,
@@ -34,6 +39,11 @@ class ResourceProviderStub(object):
         )
     self.Invoke = channel.unary_unary(
         '/pulumirpc.ResourceProvider/Invoke',
+        request_serializer=provider__pb2.InvokeRequest.SerializeToString,
+        response_deserializer=provider__pb2.InvokeResponse.FromString,
+        )
+    self.StreamInvoke = channel.unary_stream(
+        '/pulumirpc.ResourceProvider/StreamInvoke',
         request_serializer=provider__pb2.InvokeRequest.SerializeToString,
         response_deserializer=provider__pb2.InvokeResponse.FromString,
         )
@@ -84,6 +94,13 @@ class ResourceProviderServicer(object):
   within a single package.  It is driven by the overall planning engine in response to resource diffs.
   """
 
+  def GetSchema(self, request, context):
+    """GetSchema fetches the schema for this resource provider.
+    """
+    context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+    context.set_details('Method not implemented!')
+    raise NotImplementedError('Method not implemented!')
+
   def CheckConfig(self, request, context):
     """CheckConfig validates the configuration for this resource provider.
     """
@@ -112,6 +129,14 @@ class ResourceProviderServicer(object):
     context.set_details('Method not implemented!')
     raise NotImplementedError('Method not implemented!')
 
+  def StreamInvoke(self, request, context):
+    """StreamInvoke dynamically executes a built-in function in the provider, which returns a stream
+    of responses.
+    """
+    context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+    context.set_details('Method not implemented!')
+    raise NotImplementedError('Method not implemented!')
+
   def Check(self, request, context):
     """Check validates that the given property bag is valid for a resource of the given type and returns the inputs
     that should be passed to successive calls to Diff, Create, or Update for this resource. As a rule, the provider
@@ -132,7 +157,7 @@ class ResourceProviderServicer(object):
 
   def Create(self, request, context):
     """Create allocates a new instance of the provided resource and returns its unique ID afterwards.  (The input ID
-    must be blank.)  If this call fails, the resource must not have been created (i.e., it is "transacational").
+    must be blank.)  If this call fails, the resource must not have been created (i.e., it is "transactional").
     """
     context.set_code(grpc.StatusCode.UNIMPLEMENTED)
     context.set_details('Method not implemented!')
@@ -177,6 +202,11 @@ class ResourceProviderServicer(object):
 
 def add_ResourceProviderServicer_to_server(servicer, server):
   rpc_method_handlers = {
+      'GetSchema': grpc.unary_unary_rpc_method_handler(
+          servicer.GetSchema,
+          request_deserializer=provider__pb2.GetSchemaRequest.FromString,
+          response_serializer=provider__pb2.GetSchemaResponse.SerializeToString,
+      ),
       'CheckConfig': grpc.unary_unary_rpc_method_handler(
           servicer.CheckConfig,
           request_deserializer=provider__pb2.CheckRequest.FromString,
@@ -194,6 +224,11 @@ def add_ResourceProviderServicer_to_server(servicer, server):
       ),
       'Invoke': grpc.unary_unary_rpc_method_handler(
           servicer.Invoke,
+          request_deserializer=provider__pb2.InvokeRequest.FromString,
+          response_serializer=provider__pb2.InvokeResponse.SerializeToString,
+      ),
+      'StreamInvoke': grpc.unary_stream_rpc_method_handler(
+          servicer.StreamInvoke,
           request_deserializer=provider__pb2.InvokeRequest.FromString,
           response_serializer=provider__pb2.InvokeResponse.SerializeToString,
       ),

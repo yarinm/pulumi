@@ -23,6 +23,7 @@ import (
 	"os/user"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -30,28 +31,29 @@ import (
 	"gocloud.dev/blob"
 	_ "gocloud.dev/blob/azureblob" // driver for azblob://
 	_ "gocloud.dev/blob/fileblob"  // driver for file://
-	_ "gocloud.dev/blob/gcsblob"   // driver for gs://
+	"gocloud.dev/blob/gcsblob"     // driver for gs://
 	_ "gocloud.dev/blob/s3blob"    // driver for s3://
 	"gocloud.dev/gcerrors"
 
-	"github.com/pulumi/pulumi/pkg/apitype"
-	"github.com/pulumi/pulumi/pkg/backend"
-	"github.com/pulumi/pulumi/pkg/backend/display"
-	"github.com/pulumi/pulumi/pkg/diag"
-	"github.com/pulumi/pulumi/pkg/diag/colors"
-	"github.com/pulumi/pulumi/pkg/encoding"
-	"github.com/pulumi/pulumi/pkg/engine"
-	"github.com/pulumi/pulumi/pkg/operations"
-	"github.com/pulumi/pulumi/pkg/resource/config"
-	"github.com/pulumi/pulumi/pkg/resource/deploy"
-	"github.com/pulumi/pulumi/pkg/resource/edit"
-	"github.com/pulumi/pulumi/pkg/resource/stack"
-	"github.com/pulumi/pulumi/pkg/tokens"
-	"github.com/pulumi/pulumi/pkg/util/contract"
-	"github.com/pulumi/pulumi/pkg/util/logging"
-	"github.com/pulumi/pulumi/pkg/util/result"
-	"github.com/pulumi/pulumi/pkg/util/validation"
-	"github.com/pulumi/pulumi/pkg/workspace"
+	"github.com/pulumi/pulumi/pkg/v2/backend"
+	"github.com/pulumi/pulumi/pkg/v2/backend/display"
+	"github.com/pulumi/pulumi/pkg/v2/engine"
+	"github.com/pulumi/pulumi/pkg/v2/operations"
+	"github.com/pulumi/pulumi/pkg/v2/resource/deploy"
+	"github.com/pulumi/pulumi/pkg/v2/resource/edit"
+	"github.com/pulumi/pulumi/pkg/v2/resource/stack"
+	"github.com/pulumi/pulumi/pkg/v2/util/validation"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/apitype"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/diag"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/diag/colors"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/encoding"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource/config"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/tokens"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/cmdutil"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/contract"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/logging"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/result"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/workspace"
 )
 
 // Backend extends the base backend interface with specific information about local backends.
@@ -106,16 +108,28 @@ func New(d diag.Sink, originalURL string) (Backend, error) {
 		return nil, err
 	}
 
-	bucket, err := blob.OpenBucket(context.TODO(), u)
+	p, err := url.Parse(u)
+	if err != nil {
+		return nil, err
+	}
+
+	blobmux := blob.DefaultURLMux()
+
+	// for gcp we want to support additional credentials
+	// schemes on top of go-cloud's default credentials mux.
+	if p.Scheme == gcsblob.Scheme {
+		blobmux, err = GoogleCredentialsMux(context.TODO())
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	bucket, err := blobmux.OpenBucket(context.TODO(), u)
 	if err != nil {
 		return nil, errors.Wrapf(err, "unable to open bucket %s", u)
 	}
 
 	if !strings.HasPrefix(u, FilePathPrefix) {
-		p, err := url.Parse(u)
-		if err != nil {
-			return nil, err
-		}
 		bucketSubDir := strings.TrimLeft(p.Path, "/")
 		if bucketSubDir != "" {
 			if !strings.HasSuffix(bucketSubDir, "/") {
@@ -212,6 +226,14 @@ func (b *localBackend) GetPolicyPack(ctx context.Context, policyPack string,
 	return nil, fmt.Errorf("File state backend does not support resource policy")
 }
 
+func (b *localBackend) ListPolicyGroups(ctx context.Context, orgName string) (apitype.ListPolicyGroupsResponse, error) {
+	return apitype.ListPolicyGroupsResponse{}, fmt.Errorf("File state backend does not support resource policy")
+}
+
+func (b *localBackend) ListPolicyPacks(ctx context.Context, orgName string) (apitype.ListPolicyPacksResponse, error) {
+	return apitype.ListPolicyPacksResponse{}, fmt.Errorf("File state backend does not support resource policy")
+}
+
 // SupportsOrganizations tells whether a user can belong to multiple organizations in this backend.
 func (b *localBackend) SupportsOrganizations() bool {
 	return false
@@ -219,6 +241,21 @@ func (b *localBackend) SupportsOrganizations() bool {
 
 func (b *localBackend) ParseStackReference(stackRefName string) (backend.StackReference, error) {
 	return localBackendReference{name: tokens.QName(stackRefName)}, nil
+}
+
+// ValidateStackName verifies the stack name is valid for the local backend. We use the same rules as the
+// httpstate backend.
+func (b *localBackend) ValidateStackName(stackName string) error {
+	if strings.Contains(stackName, "/") {
+		return errors.New("stack names may not contain slashes")
+	}
+
+	validNameRegex := regexp.MustCompile("^[A-Za-z0-9_.-]{1,100}$")
+	if !validNameRegex.MatchString(stackName) {
+		return errors.New("stack names may only contain alphanumeric, hyphens, underscores, or periods")
+	}
+
+	return nil
 }
 
 func (b *localBackend) DoesProjectExist(ctx context.Context, projectName string) (bool, error) {
@@ -393,9 +430,14 @@ func (b *localBackend) Destroy(ctx context.Context, stack backend.Stack,
 	return backend.PreviewThenPromptThenExecute(ctx, apitype.DestroyUpdate, stack, op, b.apply)
 }
 
-func (b *localBackend) Query(ctx context.Context, stack backend.Stack,
+func (b *localBackend) Query(ctx context.Context, op backend.QueryOperation) result.Result {
+
+	return b.query(ctx, op, nil /*events*/)
+}
+
+func (b *localBackend) Watch(ctx context.Context, stack backend.Stack,
 	op backend.UpdateOperation) result.Result {
-	return b.query(ctx, stack, op, nil /*events*/)
+	return backend.Watch(ctx, b, stack, op, b.apply)
 }
 
 // apply actually performs the provided type of update on a locally hosted stack.
@@ -408,7 +450,7 @@ func (b *localBackend) apply(
 	stackName := stackRef.Name()
 	actionLabel := backend.ActionLabel(kind, opts.DryRun)
 
-	if !op.Opts.Display.JSONDisplay {
+	if !(op.Opts.Display.JSONDisplay || op.Opts.Display.Type == display.DisplayWatch) {
 		// Print a banner so it's clear this is a local deployment.
 		fmt.Printf(op.Opts.Display.Color.Colorize(
 			colors.SpecHeadline+"%s (%s):"+colors.Reset+"\n"), actionLabel, stackRef)
@@ -536,7 +578,12 @@ func (b *localBackend) apply(
 		} else {
 			link, err = b.bucket.SignedURL(context.TODO(), b.stackPath(stackName), nil)
 			if err != nil {
-				return changes, result.FromError(errors.Wrap(err, "Could not get signed url for stack location"))
+				// we log a warning here rather then returning an error to avoid exiting
+				// pulumi with an error code.
+				// printing a statefile perma link happens after all the providers have finished
+				// deploying the infrastructure, failing the pulumi update because there was a
+				// problem printing a statefile perma link can be missleading in automated CI environments.
+				cmdutil.Diag().Warningf(diag.Message("", "Could not get signed url for stack location: %v"), err)
 			}
 		}
 
@@ -549,12 +596,10 @@ func (b *localBackend) apply(
 }
 
 // query executes a query program against the resource outputs of a locally hosted stack.
-func (b *localBackend) query(ctx context.Context, stack backend.Stack, op backend.UpdateOperation,
-	events chan<- engine.Event) result.Result {
+func (b *localBackend) query(ctx context.Context, op backend.QueryOperation,
+	callerEventsOpt chan<- engine.Event) result.Result {
 
-	// TODO: Consider implementing this for local backend. We left it out for the initial cut
-	// because we weren't sure we wanted to commit to it.
-	return result.Error("Local backend does not support querying over the state")
+	return backend.RunQuery(ctx, b, op, callerEventsOpt, b.newQuery)
 }
 
 func (b *localBackend) GetHistory(ctx context.Context, stackRef backend.StackReference) ([]backend.UpdateInfo, error) {

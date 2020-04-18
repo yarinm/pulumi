@@ -24,22 +24,24 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pulumi/pulumi/pkg/v2/engine"
+
 	"github.com/pkg/errors"
 	"gocloud.dev/gcerrors"
 
-	"github.com/pulumi/pulumi/pkg/apitype"
-	"github.com/pulumi/pulumi/pkg/backend"
-	"github.com/pulumi/pulumi/pkg/encoding"
-	"github.com/pulumi/pulumi/pkg/resource/config"
-	"github.com/pulumi/pulumi/pkg/resource/deploy"
-	"github.com/pulumi/pulumi/pkg/resource/stack"
-	"github.com/pulumi/pulumi/pkg/secrets"
-	"github.com/pulumi/pulumi/pkg/tokens"
-	"github.com/pulumi/pulumi/pkg/util/cmdutil"
-	"github.com/pulumi/pulumi/pkg/util/contract"
-	"github.com/pulumi/pulumi/pkg/util/fsutil"
-	"github.com/pulumi/pulumi/pkg/util/logging"
-	"github.com/pulumi/pulumi/pkg/workspace"
+	"github.com/pulumi/pulumi/pkg/v2/backend"
+	"github.com/pulumi/pulumi/pkg/v2/resource/deploy"
+	"github.com/pulumi/pulumi/pkg/v2/resource/stack"
+	"github.com/pulumi/pulumi/pkg/v2/secrets"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/apitype"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/encoding"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource/config"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/tokens"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/cmdutil"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/contract"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/fsutil"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/logging"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/workspace"
 )
 
 const DisableCheckpointBackupsEnvVar = "PULUMI_DISABLE_CHECKPOINT_BACKUPS"
@@ -48,6 +50,19 @@ const DisableCheckpointBackupsEnvVar = "PULUMI_DISABLE_CHECKPOINT_BACKUPS"
 // recommended, because it could mean proceeding even in the face of a corrupted checkpoint state file, but can
 // be used as a last resort when a command absolutely must be run.
 var DisableIntegrityChecking bool
+
+type localQuery struct {
+	root string
+	proj *workspace.Project
+}
+
+func (q *localQuery) GetRoot() string {
+	return q.root
+}
+
+func (q *localQuery) GetProject() *workspace.Project {
+	return q.proj
+}
 
 // update is an implementation of engine.Update backed by local state.
 type update struct {
@@ -67,6 +82,12 @@ func (u *update) GetProject() *workspace.Project {
 
 func (u *update) GetTarget() *deploy.Target {
 	return u.target
+}
+
+func (b *localBackend) newQuery(ctx context.Context,
+	op backend.QueryOperation) (engine.QueryInfo, error) {
+
+	return &localQuery{root: op.Root, proj: op.Proj}, nil
 }
 
 func (b *localBackend) newUpdate(stackName tokens.QName, op backend.UpdateOperation) (*update, error) {

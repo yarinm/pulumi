@@ -19,14 +19,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
-	"github.com/pulumi/pulumi/pkg/apitype"
-	"github.com/pulumi/pulumi/pkg/engine"
-	"github.com/pulumi/pulumi/pkg/resource"
-	"github.com/pulumi/pulumi/pkg/resource/deploy"
-	"github.com/pulumi/pulumi/pkg/tokens"
-	"github.com/pulumi/pulumi/pkg/util/contract"
-	"github.com/pulumi/pulumi/pkg/util/logging"
+	"github.com/pulumi/pulumi/pkg/v2/engine"
+	"github.com/pulumi/pulumi/pkg/v2/resource/deploy"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/apitype"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/tokens"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/contract"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/logging"
 )
 
 // ShowEvents reads events from the `events` channel until it is closed, displaying each event as
@@ -55,6 +56,8 @@ func ShowEvents(
 	case DisplayQuery:
 		contract.Failf("DisplayQuery can only be used in query mode, which should be invoked " +
 			"directly instead of through ShowEvents")
+	case DisplayWatch:
+		ShowWatchEvents(op, action, events, done, opts)
 	default:
 		contract.Failf("Unknown display type %d", opts.Type)
 	}
@@ -75,12 +78,15 @@ func startEventLogger(events <-chan engine.Event, done chan<- bool, path string)
 			contract.IgnoreError(logFile.Close())
 		}()
 
+		sequence := 0
 		encoder := json.NewEncoder(logFile)
 		logEvent := func(e engine.Event) error {
 			apiEvent, err := ConvertEngineEvent(e)
 			if err != nil {
 				return err
 			}
+			apiEvent.Sequence, sequence = sequence, sequence+1
+			apiEvent.Timestamp = int(time.Now().Unix())
 			return encoder.Encode(apiEvent)
 		}
 

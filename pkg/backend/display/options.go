@@ -14,7 +14,7 @@
 
 package display
 
-import "github.com/pulumi/pulumi/pkg/diag/colors"
+import "github.com/pulumi/pulumi/sdk/v2/go/common/diag/colors"
 
 // Type of output to display.
 type Type int
@@ -26,6 +26,8 @@ const (
 	DisplayDiff
 	// DisplayQuery displays query output.
 	DisplayQuery
+	// DisplayQuery displays query output.
+	DisplayWatch
 )
 
 // Options controls how the output of events are rendered

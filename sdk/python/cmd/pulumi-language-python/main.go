@@ -36,12 +36,12 @@ import (
 
 	pbempty "github.com/golang/protobuf/ptypes/empty"
 	"github.com/pkg/errors"
-	"github.com/pulumi/pulumi/pkg/util/cmdutil"
-	"github.com/pulumi/pulumi/pkg/util/contract"
-	"github.com/pulumi/pulumi/pkg/util/logging"
-	"github.com/pulumi/pulumi/pkg/util/rpcutil"
-	"github.com/pulumi/pulumi/pkg/version"
-	pulumirpc "github.com/pulumi/pulumi/sdk/proto/go"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/cmdutil"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/contract"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/logging"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/rpcutil"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/version"
+	pulumirpc "github.com/pulumi/pulumi/sdk/v2/proto/go"
 	"google.golang.org/grpc"
 )
 
@@ -160,18 +160,29 @@ func (host *pythonLanguageHost) Run(ctx context.Context, req *pulumirpc.RunReque
 
 	// Now simply spawn a process to execute the requested program, wiring up stdout/stderr directly.
 	var errResult string
-	pythonCmd := os.Getenv("PULUMI_PYTHON_CMD")
-	if pythonCmd == "" {
-		// Look for "python3" by default. "python" usually refers to Python 2.7 on most distros.
-		pythonCmd = "python3"
+	var pythonCmds []string
+	var pythonPath string
+
+	if pythonCmd := os.Getenv("PULUMI_PYTHON_CMD"); pythonCmd != "" {
+		pythonCmds = []string{pythonCmd}
+	} else {
+		// Look for "python3" by default, but fallback to `python` if not found as some Python 3
+		// distributions (in particular the default python.org Windows installation) do not include
+		// a `python3` binary.
+		pythonCmds = []string{"python3", "python"}
 	}
 
-	// Look for the Python we intend to launch and emit an error if we can't find it. This is intended
-	// to catch people that don't have Python 3 installed.
-	pythonPath, err := exec.LookPath(pythonCmd)
+	for _, pythonCmd := range pythonCmds {
+		pythonPath, err = exec.LookPath(pythonCmd)
+		// Break on the first cmd we find on the path (if any)
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf(
-			"Failed to locate '%s' on your PATH. Have you installed Python 3.6 or greater?", pythonCmd)
+			"Failed to locate any of %q on your PATH.  Have you installed Python 3.6 or greater?",
+			pythonCmds)
 	}
 
 	cmd := exec.Command(pythonPath, args...)

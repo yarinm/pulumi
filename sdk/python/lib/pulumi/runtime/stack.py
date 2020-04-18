@@ -21,20 +21,17 @@ from inspect import isawaitable
 from typing import Callable, Any, Dict, List
 
 from ..resource import ComponentResource, Resource, ResourceTransformation
-from .settings import get_project, get_stack, get_root_resource, set_root_resource
+from .settings import get_project, get_stack, get_root_resource, is_dry_run, set_root_resource
 from .rpc_manager import RPC_MANAGER
+from .sync_await import _all_tasks, _get_current_task
 from .. import log
+from . import known_types
 
 from ..output import Output
 
-async def run_in_stack(func: Callable):
-    """
-    Run the given function inside of a new stack resource.  This ensures that any stack export calls
-    will end up as output properties on the resulting stack component in the checkpoint file.  This
-    is meant for internal runtime use only and is used by the Python SDK entrypoint program.
-    """
+async def run_pulumi_func(func: Callable):
     try:
-        Stack(func)
+        func()
     finally:
         log.debug("Waiting for outstanding RPCs to complete")
 
@@ -43,10 +40,14 @@ async def run_in_stack(func: Callable):
         #
         # Note that "asyncio.sleep(0)" is the blessed way to do this:
         # https://github.com/python/asyncio/issues/284#issuecomment-154180935
+        #
+        # We await each RPC in turn so that this loop will actually block rather than busy-wait.
         while True:
             await asyncio.sleep(0)
-            if RPC_MANAGER.count == 0:
+            if len(RPC_MANAGER.rpcs) == 0:
                 break
+            log.debug(f"waiting for quiescence; {len(RPC_MANAGER.rpcs)} RPCs outstanding")
+            await RPC_MANAGER.rpcs.pop()
 
         # Asyncio event loops require that all outstanding tasks be completed by the time that the
         # event loop closes. If we're at this point and there are no outstanding RPCs, we should
@@ -55,9 +56,9 @@ async def run_in_stack(func: Callable):
         # We will occasionally start tasks deliberately that we know will never complete. We must
         # cancel them before shutting down the event loop.
         log.debug("Canceling all outstanding tasks")
-        for task in asyncio.Task.all_tasks():
+        for task in _all_tasks():
             # Don't kill ourselves, that would be silly.
-            if task == asyncio.Task.current_task():
+            if task == _get_current_task():
                 continue
             task.cancel()
 
@@ -66,12 +67,20 @@ async def run_in_stack(func: Callable):
         await asyncio.sleep(0)
 
         # Once we get scheduled again, all tasks have exited and we're good to go.
-        log.debug("run_in_stack completed")
+        log.debug("run_pulumi_func completed")
 
     if RPC_MANAGER.unhandled_exception is not None:
         raise RPC_MANAGER.unhandled_exception.with_traceback(RPC_MANAGER.exception_traceback)
 
+async def run_in_stack(func: Callable):
+    """
+    Run the given function inside of a new stack resource.  This ensures that any stack export calls
+    will end up as output properties on the resulting stack component in the checkpoint file.  This
+    is meant for internal runtime use only and is used by the Python SDK entrypoint program.
+    """
+    await run_pulumi_func(lambda: Stack(func))
 
+@known_types.stack
 class Stack(ComponentResource):
     """
     A synthetic stack component that automatically parents resources as the program runs.
@@ -148,6 +157,17 @@ def massage(attr: Any, seen: List[Any]):
 
     if isawaitable(attr):
         return Output.from_input(attr).apply(lambda v: massage(v, seen))
+
+    if isinstance(attr, Resource):
+        result = massage(attr.__dict__, seen)
+
+        # In preview only, we mark the result with "@isPulumiResource" to indicate that it is derived
+        # from a resource. This allows the engine to perform resource-specific filtering of unknowns
+        # from output diffs during a preview. This filtering is not necessary during an update because
+        # all property values are known.
+        if is_dry_run():
+            result["@isPulumiResource"] = True
+        return result
 
     if hasattr(attr, "__dict__"):
         # recurse on the dictionary itself.  It will be handled above.

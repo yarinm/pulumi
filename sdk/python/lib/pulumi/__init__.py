@@ -19,7 +19,7 @@ resources.
 """
 
 # Make subpackages available.
-__all__ = ['runtime', 'dynamic']
+__all__ = ['runtime', 'dynamic', 'policy']
 
 # Make all module members inside of this package available as package members.
 from .asset import (
@@ -71,6 +71,8 @@ from .output import (
     Output,
     Input,
     Inputs,
+    UNKNOWN,
+    contains_unknowns,
 )
 
 from .log import (

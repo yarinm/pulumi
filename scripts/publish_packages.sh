@@ -5,7 +5,7 @@ set -o errexit
 set -o pipefail
 readonly ROOT=$(dirname "${0}")/..
 
-NPM_VERSION=$("${ROOT}/scripts/get-version")
+NPM_VERSION=$("${ROOT}/scripts/get-version" HEAD)
 "${ROOT}/scripts/build-sdk.sh" $(echo ${NPM_VERSION} | sed -e 's/\+.*//g') $(git rev-parse HEAD)
 
 if [[ "${TRAVIS_PUBLISH_PACKAGES:-}" == "true" ]]; then
@@ -14,6 +14,10 @@ if [[ "${TRAVIS_PUBLISH_PACKAGES:-}" == "true" ]]; then
 
     if [[ "${TRAVIS_BRANCH:-}" == features/* ]]; then
         NPM_TAG=$(echo "${TRAVIS_BRANCH}" | sed -e 's|^features/|feature-|g')
+    fi
+
+    if [[ "${TRAVIS_BRANCH:-}" == feature-* ]]; then
+        NPM_TAG=$(echo "${TRAVIS_BRANCH}")
     fi
 
     PKG_NAME=$(jq -r .name < "${ROOT}/sdk/nodejs/bin/package.json")
@@ -55,6 +59,10 @@ if [[ "${TRAVIS_PUBLISH_PACKAGES:-}" == "true" ]]; then
         "${ROOT}/sdk/python/env/src/dist"/*.whl \
         --skip-existing \
         --verbose
+
+    echo "Publishing .nupkgs to nuget.org:"
+    find /opt/pulumi/nuget -name 'Pulumi*.nupkg' \
+        -exec dotnet nuget push -k ${NUGET_PUBLISH_KEY} -s https://api.nuget.org/v3/index.json {} ';'
 
     "${ROOT}/scripts/build-and-publish-docker" "${NPM_VERSION}"
 

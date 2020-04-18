@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/pkg/errors"
-	"github.com/pulumi/pulumi/pkg/resource"
-	"github.com/pulumi/pulumi/pkg/resource/config"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource/config"
 	"github.com/stretchr/testify/assert"
 )
 

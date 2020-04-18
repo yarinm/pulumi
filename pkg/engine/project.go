@@ -22,7 +22,7 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/pulumi/pulumi/pkg/workspace"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/workspace"
 )
 
 type Projinfo struct {
@@ -51,13 +51,13 @@ func getPwdMain(root, main string) (string, string, error) {
 		main = "."
 	} else {
 		// The path must be relative from the package root.
-		if filepath.IsAbs(main) {
+		if path.IsAbs(main) {
 			return "", "", errors.New("project 'main' must be a relative path")
 		}
 
 		// Check that main is a subdirectory.
 		cleanPwd := filepath.Clean(pwd)
-		main = filepath.Clean(path.Join(cleanPwd, main))
+		main = filepath.Clean(filepath.Join(cleanPwd, main))
 		if !strings.HasPrefix(main, cleanPwd) {
 			return "", "", errors.New("project 'main' must be a subfolder")
 		}

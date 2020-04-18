@@ -13,11 +13,12 @@
 # limitations under the License.
 import asyncio
 import unittest
+from typing import Any, Optional
 
 from google.protobuf import struct_pb2
 from pulumi.resource import CustomResource
-from pulumi.runtime import rpc, known_types
-from pulumi.output import Output
+from pulumi.runtime import rpc, known_types, settings
+from pulumi.output import Output, UNKNOWN
 from pulumi.asset import (
     FileAsset,
     RemoteAsset,
@@ -126,6 +127,28 @@ class NextSerializationTests(unittest.TestCase):
         self.assertListEqual(deps, [existing, res])
         self.assertEqual(42, prop)
 
+        known_fut = asyncio.Future()
+        known_fut.set_result(False)
+        out = Output(set(), fut, known_fut)
+
+        # For compatibility, future() should still return 42 even if the value is unknown.
+        prop = await out.future()
+        self.assertEqual(42, prop)
+
+        fut = asyncio.Future()
+        fut.set_result(UNKNOWN)
+        known_fut = asyncio.Future()
+        known_fut.set_result(True)
+        out = Output(set(), fut, known_fut)
+
+        # For compatibility, is_known() should return False and future() should return None when the value contains
+        # first-class unknowns.
+        self.assertEqual(False, await out.is_known())
+        self.assertEqual(None, await out.future())
+
+        # If the caller of future() explicitly accepts first-class unknowns, they should be present in the result.
+        self.assertEqual(UNKNOWN, await out.future(with_unknowns=True))
+
     @async_test
     async def test_output_all(self):
         res = FakeCustomResource("some-resource")
@@ -175,9 +198,9 @@ class NextSerializationTests(unittest.TestCase):
 
         other = FakeCustomResource("some-other-resource")
         other_fut = asyncio.Future()
-        other_fut.set_result(99)
+        other_fut.set_result(UNKNOWN) # <- not known
         other_known_fut = asyncio.Future()
-        other_known_fut.set_result(False) # <- not known
+        other_known_fut.set_result(False)
         other_out = Output({other}, other_fut, other_known_fut)
 
         combined = Output.all(out, other_out)
@@ -249,6 +272,598 @@ class NextSerializationTests(unittest.TestCase):
 
         self.assertIsNotNone(error)
         self.assertEqual("unexpected input of type MyClass", str(error))
+
+    @async_test
+    async def test_distinguished_unknown_output(self):
+        fut = asyncio.Future()
+        fut.set_result(UNKNOWN)
+        known_fut = asyncio.Future()
+        known_fut.set_result(True)
+        out = Output(set(), fut, known_fut)
+        self.assertFalse(await out.is_known())
+
+        fut = asyncio.Future()
+        fut.set_result(["foo", UNKNOWN])
+        out = Output(set(), fut, known_fut)
+        self.assertFalse(await out.is_known())
+
+        fut = asyncio.Future()
+        fut.set_result({"foo": "foo", "bar": UNKNOWN})
+        out = Output(set(), fut, known_fut)
+        self.assertFalse(await out.is_known())
+
+    def create_output(self, val: Any, is_known: bool, is_secret: Optional[bool] = None):
+        fut = asyncio.Future()
+        fut.set_result(val)
+        known_fut = asyncio.Future()
+        known_fut.set_result(is_known)
+        if is_secret is not None:
+            is_secret_fut = asyncio.Future()
+            is_secret_fut.set_result(True)
+            return Output(set(), fut, known_fut, is_secret_fut)
+        return Output(set(), fut, known_fut)
+
+    @async_test
+    async def test_apply_can_run_on_known_value_during_preview(self):
+        settings.SETTINGS.dry_run = True
+
+        out = self.create_output(0, is_known=True)
+        r = out.apply(lambda v: v + 1)
+
+        self.assertTrue(await r.is_known())
+        self.assertEqual(await r.future(), 1)
+
+    @async_test
+    async def test_apply_can_run_on_known_awaitable_value_during_preview(self):
+        settings.SETTINGS.dry_run = True
+
+        out = self.create_output(0, is_known=True)
+
+        def apply(v):
+            fut = asyncio.Future()
+            fut.set_result("inner")
+            return fut
+        r = out.apply(apply)
+
+        self.assertTrue(await r.is_known())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_can_run_on_known_known_output_value_during_preview(self):
+        settings.SETTINGS.dry_run = True
+
+        out = self.create_output(0, is_known=True)
+        r = out.apply(lambda v: self.create_output("inner", is_known=True))
+
+        self.assertTrue(await r.is_known())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_can_run_on_known_unknown_output_value_during_preview(self):
+        settings.SETTINGS.dry_run = True
+
+        out = self.create_output(0, is_known=True)
+        r = out.apply(lambda v: self.create_output("inner", is_known=False))
+
+        self.assertFalse(await r.is_known())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_produces_unknown_default_on_unknown_during_preview(self):
+        settings.SETTINGS.dry_run = True
+
+        out = self.create_output(0, is_known=False)
+        r = out.apply(lambda v: v + 1)
+
+        self.assertFalse(await r.is_known())
+        self.assertEqual(await r.future(), None)
+
+    @async_test
+    async def test_apply_produces_unknown_default_on_unknown_awaitable_during_preview(self):
+        settings.SETTINGS.dry_run = True
+
+        out = self.create_output(0, is_known=False)
+
+        def apply(v):
+            fut = asyncio.Future()
+            fut.set_result("inner")
+            return fut
+        r = out.apply(apply)
+
+        self.assertFalse(await r.is_known())
+        self.assertEqual(await r.future(), None)
+
+    @async_test
+    async def test_apply_produces_unknown_default_on_unknown_known_output_during_preview(self):
+        settings.SETTINGS.dry_run = True
+
+        out = self.create_output(0, is_known=False)
+        r = out.apply(lambda v: self.create_output("inner", is_known=True))
+
+        self.assertFalse(await r.is_known())
+        self.assertEqual(await r.future(), None)
+
+    @async_test
+    async def test_apply_produces_unknown_default_on_unknown_unknown_output_during_preview(self):
+        settings.SETTINGS.dry_run = True
+
+        out = self.create_output(0, is_known=False)
+        r = out.apply(lambda v: self.create_output("inner", is_known=False))
+
+        self.assertFalse(await r.is_known())
+        self.assertEqual(await r.future(), None)
+
+    @async_test
+    async def test_apply_preserves_secret_on_known_during_preview(self):
+        settings.SETTINGS.dry_run = True
+
+        out = self.create_output(0, is_known=True, is_secret=True)
+        r = out.apply(lambda v: v + 1)
+
+        self.assertTrue(await r.is_known())
+        self.assertTrue(await r.is_secret())
+        self.assertEqual(await r.future(), 1)
+
+    @async_test
+    async def test_apply_preserves_secret_on_known_awaitable_during_preview(self):
+        settings.SETTINGS.dry_run = True
+
+        out = self.create_output(0, is_known=True, is_secret=True)
+
+        def apply(v):
+            fut = asyncio.Future()
+            fut.set_result("inner")
+            return fut
+        r = out.apply(apply)
+
+        self.assertTrue(await r.is_known())
+        self.assertTrue(await r.is_secret())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_preserves_secret_on_known_known_output_during_preview(self):
+        settings.SETTINGS.dry_run = True
+
+        out = self.create_output(0, is_known=True, is_secret=True)
+        r = out.apply(lambda v: self.create_output("inner", is_known=True))
+
+        self.assertTrue(await r.is_known())
+        self.assertTrue(await r.is_secret())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_preserves_secret_on_known_unknown_output_during_preview(self):
+        settings.SETTINGS.dry_run = True
+
+        out = self.create_output(0, is_known=True, is_secret=True)
+        r = out.apply(lambda v: self.create_output("inner", is_known=False))
+
+        self.assertFalse(await r.is_known())
+        self.assertTrue(await r.is_secret())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_preserves_secret_on_unknown_during_preview(self):
+        settings.SETTINGS.dry_run = True
+
+        out = self.create_output(0, is_known=False, is_secret=True)
+        r = out.apply(lambda v: v + 1)
+
+        self.assertFalse(await r.is_known())
+        self.assertTrue(await r.is_secret())
+        self.assertEqual(await r.future(), None)
+
+    @async_test
+    async def test_apply_preserves_secret_on_unknown_awaitable_during_preview(self):
+        settings.SETTINGS.dry_run = True
+
+        out = self.create_output(0, is_known=False, is_secret=True)
+
+        def apply(v):
+            fut = asyncio.Future()
+            fut.set_result("inner")
+            return fut
+        r = out.apply(apply)
+
+        self.assertFalse(await r.is_known())
+        self.assertTrue(await r.is_secret())
+        self.assertEqual(await r.future(), None)
+
+    @async_test
+    async def test_apply_preserves_secret_on_unknown_known_output_during_preview(self):
+        settings.SETTINGS.dry_run = True
+
+        out = self.create_output(0, is_known=False, is_secret=True)
+        r = out.apply(lambda v: self.create_output("inner", is_known=True))
+
+        self.assertFalse(await r.is_known())
+        self.assertTrue(await r.is_secret())
+        self.assertEqual(await r.future(), None)
+
+    @async_test
+    async def test_apply_preserves_secret_on_unknown_unknown_output_during_preview(self):
+        settings.SETTINGS.dry_run = True
+
+        out = self.create_output(0, is_known=False, is_secret=True)
+        r = out.apply(lambda v: self.create_output("inner", is_known=False))
+
+        self.assertFalse(await r.is_known())
+        self.assertTrue(await r.is_secret())
+        self.assertEqual(await r.future(), None)
+
+    @async_test
+    async def test_apply_propagates_secret_on_known_known_output_during_preview(self):
+        settings.SETTINGS.dry_run = True
+
+        out = self.create_output(0, is_known=True)
+        r = out.apply(lambda v: self.create_output("inner", is_known=True, is_secret=True))
+
+        self.assertTrue(await r.is_known())
+        self.assertTrue(await r.is_secret())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_propagates_secret_on_known_unknown_output_during_preview(self):
+        settings.SETTINGS.dry_run = True
+
+        out = self.create_output(0, is_known=True)
+        r = out.apply(lambda v: self.create_output("inner", is_known=False, is_secret=True))
+
+        self.assertFalse(await r.is_known())
+        self.assertTrue(await r.is_secret())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_does_not_propagate_secret_on_unknown_known_output_during_preview(self):
+        settings.SETTINGS.dry_run = True
+
+        out = self.create_output(0, is_known=False)
+        r = out.apply(lambda v: self.create_output("inner", is_known=True, is_secret=True))
+
+        self.assertFalse(await r.is_known())
+        self.assertFalse(await r.is_secret())
+        self.assertEqual(await r.future(), None)
+
+    @async_test
+    async def test_apply_does_not_propagate_secret_on_unknown_unknown_output_during_preview(self):
+        settings.SETTINGS.dry_run = True
+
+        out = self.create_output(0, is_known=False)
+        r = out.apply(lambda v: self.create_output("inner", is_known=false, is_secret=True))
+
+        self.assertFalse(await r.is_known())
+        self.assertFalse(await r.is_secret())
+        self.assertEqual(await r.future(), None)
+
+    @async_test
+    async def test_apply_can_run_on_known_value(self):
+        settings.SETTINGS.dry_run = False
+
+        out = self.create_output(0, is_known=True)
+        r = out.apply(lambda v: v + 1)
+
+        self.assertTrue(await r.is_known())
+        self.assertEqual(await r.future(), 1)
+
+    @async_test
+    async def test_apply_can_run_on_known_awaitable_value(self):
+        settings.SETTINGS.dry_run = False
+
+        out = self.create_output(0, is_known=True)
+
+        def apply(v):
+            fut = asyncio.Future()
+            fut.set_result("inner")
+            return fut
+        r = out.apply(apply)
+
+        self.assertTrue(await r.is_known())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_can_run_on_known_known_output_value(self):
+        settings.SETTINGS.dry_run = False
+
+        out = self.create_output(0, is_known=True)
+        r = out.apply(lambda v: self.create_output("inner", is_known=True))
+
+        self.assertTrue(await r.is_known())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_can_run_on_known_unknown_output_value(self):
+        settings.SETTINGS.dry_run = False
+
+        out = self.create_output(0, is_known=True)
+        r = out.apply(lambda v: self.create_output("inner", is_known=False))
+
+        self.assertFalse(await r.is_known())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_produces_known_on_unknown(self):
+        settings.SETTINGS.dry_run = False
+
+        out = self.create_output(0, is_known=False)
+        r = out.apply(lambda v: v + 1)
+
+        self.assertTrue(await r.is_known())
+        self.assertEqual(await r.future(), 1)
+
+    @async_test
+    async def test_apply_produces_known_on_unknown_awaitable(self):
+        settings.SETTINGS.dry_run = False
+
+        out = self.create_output(0, is_known=False)
+
+        def apply(v):
+            fut = asyncio.Future()
+            fut.set_result("inner")
+            return fut
+        r = out.apply(apply)
+
+        self.assertTrue(await r.is_known())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_produces_known_on_unknown_known_output(self):
+        settings.SETTINGS.dry_run = False
+
+        out = self.create_output(0, is_known=False)
+        r = out.apply(lambda v: self.create_output("inner", is_known=True))
+
+        self.assertTrue(await r.is_known())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_produces_unknown_on_unknown_unknown_output(self):
+        settings.SETTINGS.dry_run = False
+
+        out = self.create_output(0, is_known=False)
+        r = out.apply(lambda v: self.create_output("inner", is_known=False))
+
+        self.assertFalse(await r.is_known())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_preserves_secret_on_known(self):
+        settings.SETTINGS.dry_run = False
+
+        out = self.create_output(0, is_known=True, is_secret=True)
+        r = out.apply(lambda v: v + 1)
+
+        self.assertTrue(await r.is_known())
+        self.assertTrue(await r.is_secret())
+        self.assertEqual(await r.future(), 1)
+
+    @async_test
+    async def test_apply_preserves_secret_on_known_awaitable(self):
+        settings.SETTINGS.dry_run = False
+
+        out = self.create_output(0, is_known=True, is_secret=True)
+
+        def apply(v):
+            fut = asyncio.Future()
+            fut.set_result("inner")
+            return fut
+        r = out.apply(apply)
+
+        self.assertTrue(await r.is_known())
+        self.assertTrue(await r.is_secret())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_preserves_secret_on_known_known_output(self):
+        settings.SETTINGS.dry_run = False
+
+        out = self.create_output(0, is_known=True, is_secret=True)
+        r = out.apply(lambda v: self.create_output("inner", is_known=True))
+
+        self.assertTrue(await r.is_known())
+        self.assertTrue(await r.is_secret())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_preserves_secret_on_known_unknown_output(self):
+        settings.SETTINGS.dry_run = False
+
+        out = self.create_output(0, is_known=True, is_secret=True)
+        r = out.apply(lambda v: self.create_output("inner", is_known=False))
+
+        self.assertFalse(await r.is_known())
+        self.assertTrue(await r.is_secret())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_preserves_secret_on_unknown(self):
+        settings.SETTINGS.dry_run = False
+
+        out = self.create_output(0, is_known=False, is_secret=True)
+        r = out.apply(lambda v: v + 1)
+
+        self.assertTrue(await r.is_known())
+        self.assertTrue(await r.is_secret())
+        self.assertEqual(await r.future(), 1)
+
+    @async_test
+    async def test_apply_preserves_secret_on_unknown_awaitable(self):
+        settings.SETTINGS.dry_run = False
+
+        out = self.create_output(0, is_known=False, is_secret=True)
+
+        def apply(v):
+            fut = asyncio.Future()
+            fut.set_result("inner")
+            return fut
+        r = out.apply(apply)
+
+        self.assertTrue(await r.is_known())
+        self.assertTrue(await r.is_secret())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_preserves_secret_on_unknown_known_output(self):
+        settings.SETTINGS.dry_run = False
+
+        out = self.create_output(0, is_known=False, is_secret=True)
+        r = out.apply(lambda v: self.create_output("inner", is_known=True))
+
+        self.assertTrue(await r.is_known())
+        self.assertTrue(await r.is_secret())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_preserves_secret_on_unknown_unknown_output(self):
+        settings.SETTINGS.dry_run = False
+
+        out = self.create_output(0, is_known=False, is_secret=True)
+        r = out.apply(lambda v: self.create_output("inner", is_known=False))
+
+        self.assertFalse(await r.is_known())
+        self.assertTrue(await r.is_secret())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_propagates_secret_on_known_known_output(self):
+        settings.SETTINGS.dry_run = False
+
+        out = self.create_output(0, is_known=True)
+        r = out.apply(lambda v: self.create_output("inner", is_known=True, is_secret=True))
+
+        self.assertTrue(await r.is_known())
+        self.assertTrue(await r.is_secret())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_propagates_secret_on_known_unknown_output(self):
+        settings.SETTINGS.dry_run = False
+
+        out = self.create_output(0, is_known=True)
+        r = out.apply(lambda v: self.create_output("inner", is_known=False, is_secret=True))
+
+        self.assertFalse(await r.is_known())
+        self.assertTrue(await r.is_secret())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_propagates_secret_on_unknown_known_output(self):
+        settings.SETTINGS.dry_run = False
+
+        out = self.create_output(0, is_known=False)
+        r = out.apply(lambda v: self.create_output("inner", is_known=True, is_secret=True))
+
+        self.assertTrue(await r.is_known())
+        self.assertTrue(await r.is_secret())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_propagates_secret_on_unknown_unknown_output(self):
+        settings.SETTINGS.dry_run = False
+
+        out = self.create_output(0, is_known=False)
+        r = out.apply(lambda v: self.create_output("inner", is_known=False, is_secret=True))
+
+        self.assertFalse(await r.is_known())
+        self.assertTrue(await r.is_secret())
+        self.assertEqual(await r.future(), "inner")
+
+    @async_test
+    async def test_apply_unknown_output(self):
+        out = self.create_output("foo", is_known=True)
+
+        r1 = out.apply(lambda v: UNKNOWN)
+        r2 = out.apply(lambda v: [v, UNKNOWN])
+        r3 = out.apply(lambda v: {"v": v, "unknown": UNKNOWN})
+        r4 = out.apply(lambda v: UNKNOWN).apply(lambda v: v, True)
+        r5 = out.apply(lambda v: [v, UNKNOWN]).apply(lambda v: v, True)
+        r6 = out.apply(lambda v: {"v": v, "unknown": UNKNOWN}).apply(lambda v: v, True)
+
+        self.assertFalse(await r1.is_known())
+        self.assertFalse(await r2.is_known())
+        self.assertFalse(await r3.is_known())
+        self.assertFalse(await r4.is_known())
+        self.assertFalse(await r5.is_known())
+        self.assertFalse(await r6.is_known())
+
+    @async_test
+    async def test_lifted_unknown(self):
+        settings.SETTINGS.dry_run = True
+
+        fut = asyncio.Future()
+        fut.set_result(UNKNOWN)
+        out = Output.from_input({ "foo": "foo", "bar": UNKNOWN, "baz": fut})
+
+        self.assertFalse(await out.is_known())
+
+        r1 = out["foo"]
+        self.assertTrue(await r1.is_known())
+        self.assertEqual(await r1.future(with_unknowns=True), "foo")
+
+        r2 = out["bar"]
+        self.assertFalse(await r2.is_known())
+        self.assertEqual(await r2.future(with_unknowns=True), UNKNOWN)
+
+        r3 = out["baz"]
+        self.assertFalse(await r3.is_known())
+        self.assertEqual(await r3.future(with_unknowns=True), UNKNOWN)
+
+        r4 = out["baz"]["qux"]
+        self.assertFalse(await r4.is_known())
+        self.assertEqual(await r4.future(with_unknowns=True), UNKNOWN)
+
+        out = Output.from_input([ "foo", UNKNOWN ])
+
+        r5 = out[0]
+        self.assertTrue(await r5.is_known())
+        self.assertEqual(await r5.future(with_unknowns=True), "foo")
+
+        r6 = out[1]
+        self.assertFalse(await r6.is_known())
+        self.assertEqual(await r6.future(with_unknowns=True), UNKNOWN)
+
+        out = Output.all(Output.from_input("foo"), Output.from_input(UNKNOWN),
+            Output.from_input([ Output.from_input(UNKNOWN), Output.from_input("bar") ]))
+
+        self.assertFalse(await out.is_known())
+
+        r7 = out[0]
+        self.assertTrue(await r7.is_known())
+        self.assertEqual(await r7.future(with_unknowns=True), "foo")
+
+        r8 = out[1]
+        self.assertFalse(await r8.is_known())
+        self.assertEqual(await r8.future(with_unknowns=True), UNKNOWN)
+
+        r9 = out[2]
+        self.assertFalse(await r9.is_known())
+
+        r10 = r9[0]
+        self.assertFalse(await r10.is_known())
+        self.assertEqual(await r10.future(with_unknowns=True), UNKNOWN)
+
+        r11 = r9[1]
+        self.assertTrue(await r11.is_known())
+        self.assertEqual(await r11.future(with_unknowns=True), "bar")
+
+
+    @async_test
+    async def test_output_coros(self):
+        # Ensure that Outputs function properly when the input value and is_known are coroutines. If the implementation
+        # is not careful to wrap these coroutines in Futures, they will be awaited more than once and the runtime will
+        # throw.
+        async def value():
+            await asyncio.sleep(0)
+            return 42
+        async def is_known():
+            await asyncio.sleep(0)
+            return True
+
+        out = Output(set(), value(), is_known())
+
+        self.assertTrue(await out.is_known())
+        self.assertEqual(42, await out.future())
+        self.assertEqual(42, await out.apply(lambda v: v).future())
+
 
 class DeserializationTests(unittest.TestCase):
     def test_unsupported_sig(self):

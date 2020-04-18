@@ -19,15 +19,15 @@ import (
 	"sync"
 
 	"github.com/opentracing/opentracing-go"
-	"github.com/pulumi/pulumi/pkg/diag"
-	"github.com/pulumi/pulumi/pkg/resource"
-	"github.com/pulumi/pulumi/pkg/resource/deploy"
-	"github.com/pulumi/pulumi/pkg/resource/deploy/providers"
-	"github.com/pulumi/pulumi/pkg/resource/plugin"
-	"github.com/pulumi/pulumi/pkg/util/contract"
-	"github.com/pulumi/pulumi/pkg/util/fsutil"
-	"github.com/pulumi/pulumi/pkg/util/result"
-	"github.com/pulumi/pulumi/pkg/workspace"
+	"github.com/pulumi/pulumi/pkg/v2/resource/deploy"
+	"github.com/pulumi/pulumi/pkg/v2/resource/deploy/providers"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/diag"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource/plugin"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/contract"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/fsutil"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/result"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/workspace"
 )
 
 // ProjectInfoContext returns information about the current project, including its pwd, main, and plugin context.
@@ -135,8 +135,9 @@ func plan(ctx *Context, info *planContext, opts planOptions, dryRun bool) (*plan
 	}
 
 	// Generate a plan; this API handles all interesting cases (create, update, delete).
+	localPolicyPackPaths := ConvertLocalPolicyPacksToPaths(opts.LocalPolicyPacks)
 	plan, err := deploy.NewPlan(
-		plugctx, target, target.Snapshot, source, opts.LocalPolicyPackPaths, dryRun, ctx.BackendClient)
+		plugctx, target, target.Snapshot, source, localPolicyPackPaths, dryRun, ctx.BackendClient)
 	if err != nil {
 		contract.IgnoreClose(plugctx)
 		return nil, err
@@ -182,8 +183,10 @@ func (planResult *planResult) Walk(cancelCtx *Context, events deploy.Events, pre
 			Refresh:           planResult.Options.Refresh,
 			RefreshOnly:       planResult.Options.isRefresh,
 			RefreshTargets:    planResult.Options.RefreshTargets,
+			ReplaceTargets:    planResult.Options.ReplaceTargets,
 			DestroyTargets:    planResult.Options.DestroyTargets,
 			UpdateTargets:     planResult.Options.UpdateTargets,
+			TargetDependents:  planResult.Options.TargetDependents,
 			TrustDependencies: planResult.Options.trustDependencies,
 			UseLegacyDiff:     planResult.Options.UseLegacyDiff,
 		}
@@ -223,7 +226,14 @@ func printPlan(ctx *Context, planResult *planResult, dryRun bool, policies map[s
 
 	// Walk the plan's steps and and pretty-print them out.
 	actions := newPlanActions(planResult.Options)
-	if res := planResult.Walk(ctx, actions, true); res != nil {
+	res := planResult.Walk(ctx, actions, true)
+
+	// Emit an event with a summary of operation counts.
+	changes := ResourceChanges(actions.Ops)
+	planResult.Options.Events.previewSummaryEvent(changes, policies)
+
+	if res != nil {
+
 		if res.IsBail() {
 			return nil, res
 		}
@@ -231,9 +241,6 @@ func printPlan(ctx *Context, planResult *planResult, dryRun bool, policies map[s
 		return nil, result.Error("an error occurred while advancing the preview")
 	}
 
-	// Emit an event with a summary of operation counts.
-	changes := ResourceChanges(actions.Ops)
-	planResult.Options.Events.previewSummaryEvent(changes, policies)
 	return changes, nil
 }
 

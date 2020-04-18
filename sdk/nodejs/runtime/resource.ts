@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import * as grpc from "@grpc/grpc-js";
 import * as query from "@pulumi/query";
-import * as grpc from "grpc";
 import * as log from "../log";
 import * as utils from "../utils";
 
-import { Input, Inputs, Output, output } from "../output";
+import { getAllResources, Input, Inputs, Output, output } from "../output";
 import { ResolvedResource } from "../queryable";
 import {
     ComponentResource,
@@ -42,7 +42,6 @@ import {
     serializeProperty,
     serializeResourceProperties,
     transferProperties,
-    unknownValue,
 } from "./rpc";
 import {
     excessiveDebugOutput,
@@ -118,6 +117,7 @@ export function readResource(res: Resource, t: string, name: string, props: Inpu
         req.setDependenciesList(Array.from(resop.allDirectDependencyURNs));
         req.setVersion(opts.version || "");
         req.setAcceptsecrets(true);
+        req.setAdditionalsecretoutputsList((<any>opts).additionalSecretOutputs || []);
 
         // Now run the operation, serializing the invocation if necessary.
         const opLabel = `monitor.readResource(${label})`;
@@ -193,6 +193,7 @@ export function registerResource(res: Resource, t: string, name: string, custom:
         req.setAdditionalsecretoutputsList((<any>opts).additionalSecretOutputs || []);
         req.setAliasesList(resop.aliases);
         req.setImportid(resop.import || "");
+        req.setSupportspartialvalues(true);
 
         const customTimeouts = new resproto.RegisterResourceRequest.CustomTimeouts();
         if (opts.customTimeouts != null) {
@@ -276,7 +277,8 @@ async function prepareResource(label: string, res: Resource, custom: boolean,
             new Promise<URN>(resolve => resolveURN = resolve),
             `resolveURN(${label})`),
         /*isKnown:*/ Promise.resolve(true),
-        /*isSecret:*/ Promise.resolve(false));
+        /*isSecret:*/ Promise.resolve(false),
+        Promise.resolve(res));
 
     // If a custom resource, make room for the ID property.
     let resolveID: ((v: any, performApply: boolean) => void) | undefined;
@@ -288,7 +290,8 @@ async function prepareResource(label: string, res: Resource, custom: boolean,
             debuggablePromise(new Promise<ID>(resolve => resolveValue = resolve), `resolveID(${label})`),
             debuggablePromise(new Promise<boolean>(
                 resolve => resolveIsKnown = resolve), `resolveIDIsKnown(${label})`),
-            Promise.resolve(false));
+            Promise.resolve(false),
+            Promise.resolve(res));
 
         resolveID = (v, isKnown) => {
             resolveValue(v);
@@ -396,7 +399,7 @@ async function getAllTransitivelyReferencedCustomResourceURNs(resources: Set<Res
     // To do this, first we just get the transitively reachable set of resources (not diving
     // into custom resources).  In the above picture, if we start with 'Comp1', this will be
     // [Comp1, Cust1, Comp2, Cust2, Cust3]
-    const transitivelyReachableResources = getTransitivelyReferencedChildResourcesOfComponentResources(resources);
+    const transitivelyReachableResources = await getTransitivelyReferencedChildResourcesOfComponentResources(resources);
 
     const transitivelyReachableCustomResources = [...transitivelyReachableResources].filter(r => CustomResource.isInstance(r));
     const promises = transitivelyReachableCustomResources.map(r => r.urn.promise());
@@ -408,20 +411,24 @@ async function getAllTransitivelyReferencedCustomResourceURNs(resources: Set<Res
  * Recursively walk the resources passed in, returning them and all resources reachable from
  * [Resource.__childResources] through any **Component** resources we encounter.
  */
-function getTransitivelyReferencedChildResourcesOfComponentResources(resources: Set<Resource>) {
+async function getTransitivelyReferencedChildResourcesOfComponentResources(resources: Set<Resource>) {
     // Recursively walk the dependent resources through their children, adding them to the result set.
     const result = new Set<Resource>();
-    addTransitivelyReferencedChildResourcesOfComponentResources(resources, result);
+    await addTransitivelyReferencedChildResourcesOfComponentResources(resources, result);
     return result;
 }
 
-function addTransitivelyReferencedChildResourcesOfComponentResources(resources: Set<Resource> | undefined, result: Set<Resource>) {
+async function addTransitivelyReferencedChildResourcesOfComponentResources(resources: Set<Resource> | undefined, result: Set<Resource>) {
     if (resources) {
         for (const resource of resources) {
             if (!result.has(resource)) {
                 result.add(resource);
 
                 if (ComponentResource.isInstance(resource)) {
+                    // This await is safe even if __isConstructed is undefined. Ensure that the
+                    // resource has completely finished construction.  That way all parent/child
+                    // relationships will have been setup.
+                    await resource.__data;
                     addTransitivelyReferencedChildResourcesOfComponentResources(resource.__childResources, result);
                 }
             }
@@ -448,7 +455,8 @@ async function gatherExplicitDependencies(
             // Recursively gather dependencies, await the promise, and append the output's dependencies.
             const dos = (dependsOn as Output<Input<Resource>[] | Input<Resource>>).apply(v => gatherExplicitDependencies(v));
             const urns = await dos.promise();
-            const implicits = await gatherExplicitDependencies([...dos.resources()]);
+            const dosResources = await getAllResources(dos);
+            const implicits = await gatherExplicitDependencies([...dosResources]);
             return urns.concat(implicits);
         } else {
             if (!Resource.isInstance(dependsOn)) {

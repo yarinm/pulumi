@@ -3,6 +3,12 @@
 
 set -e
 
+# The default backend URL is the Pulumi Managed Service.
+# To use one of the alternate supported backends, set the
+# PULUMI_BACKEND_URL env var according to:
+# https://www.pulumi.com/docs/intro/concepts/state/#to-a-self-managed-backend.
+pulumi login $PULUMI_BACKEND_URL
+
 # If the PULUMI_CI variable is set, we'll do some extra things to make common tasks easier.
 if [ ! -z "$PULUMI_CI" ]; then
     # Capture the PWD before we go and potentially change it.
@@ -72,9 +78,9 @@ fi
 
 # For Google, we need to authenticate with a service principal for certain authentication operations.
 if [ ! -z "$GOOGLE_CREDENTIALS" ]; then
-    GCLOUD_KEYFILE="$(mktemp).json"
-    echo "$GOOGLE_CREDENTIALS" > $GCLOUD_KEYFILE
-    gcloud auth activate-service-account --key-file=$GCLOUD_KEYFILE
+    export GOOGLE_APPLICATION_CREDENTIALS="$(mktemp).json"
+    echo "$GOOGLE_CREDENTIALS" > $GOOGLE_APPLICATION_CREDENTIALS
+    gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
 fi
 
 # Next, run npm install. We always call this, as
@@ -90,8 +96,17 @@ if [ -e package.json ]; then
     if [ -f yarn.lock ] || [ ! -z $USE_YARN ]; then
         yarn install
     else
+        # Set npm auth token if one is provided.
+        if [ ! -z "$NPM_AUTH_TOKEN" ]; then
+            echo "//registry.npmjs.org/:_authToken=$NPM_AUTH_TOKEN" > ~/.npmrc
+        fi
         npm install
     fi
+fi
+
+# If the user is running the Python SDK, we will need to install their requirements as well.
+if [ -e requirements.txt ]; then
+    pip3 install -r requirements.txt
 fi
 
 # Now just pass along all arguments to the Pulumi CLI, sending the output to a file for

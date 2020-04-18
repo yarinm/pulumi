@@ -15,9 +15,9 @@
 package backend
 
 import (
-	"github.com/pulumi/pulumi/pkg/apitype"
-	"github.com/pulumi/pulumi/pkg/engine"
-	"github.com/pulumi/pulumi/pkg/resource/config"
+	"github.com/pulumi/pulumi/pkg/v2/engine"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/apitype"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource/config"
 )
 
 // UpdateMetadata describes optional metadata about an update.
@@ -70,6 +70,10 @@ const (
 	CISystem = "ci.system"
 	// CIBuildID is an opaque ID of the build in the CI system.
 	CIBuildID = "ci.build.id"
+	// CIBuildNumber is a sequentially incrementing number specific for a project/repo.
+	// This value is only set for CI systems that have separate Build ID and a Build Number.
+	// If this value is blank, use `CIBuildID` always.
+	CIBuildNumer = "ci.build.number"
 	// CIBuildType is the type of build of the CI system, e.g. "push", "pull_request", "test_only".
 	CIBuildType = "ci.build.type"
 	// CIBuildURL is a URL to get more information about the particular CI build.

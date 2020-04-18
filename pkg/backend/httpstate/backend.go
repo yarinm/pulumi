@@ -34,40 +34,39 @@ import (
 	"github.com/pkg/errors"
 	"github.com/skratchdot/open-golang/open"
 
-	"github.com/pulumi/pulumi/pkg/apitype"
-	"github.com/pulumi/pulumi/pkg/backend"
-	"github.com/pulumi/pulumi/pkg/backend/display"
-	"github.com/pulumi/pulumi/pkg/backend/filestate"
-	"github.com/pulumi/pulumi/pkg/backend/httpstate/client"
-	"github.com/pulumi/pulumi/pkg/diag"
-	"github.com/pulumi/pulumi/pkg/diag/colors"
-	"github.com/pulumi/pulumi/pkg/engine"
-	"github.com/pulumi/pulumi/pkg/operations"
-	"github.com/pulumi/pulumi/pkg/resource"
-	"github.com/pulumi/pulumi/pkg/resource/config"
-	"github.com/pulumi/pulumi/pkg/resource/deploy"
-	"github.com/pulumi/pulumi/pkg/secrets"
-	"github.com/pulumi/pulumi/pkg/tokens"
-	"github.com/pulumi/pulumi/pkg/util/cmdutil"
-	"github.com/pulumi/pulumi/pkg/util/contract"
-	"github.com/pulumi/pulumi/pkg/util/logging"
-	"github.com/pulumi/pulumi/pkg/util/result"
-	"github.com/pulumi/pulumi/pkg/util/retry"
-	"github.com/pulumi/pulumi/pkg/workspace"
+	"github.com/pulumi/pulumi/pkg/v2/backend"
+	"github.com/pulumi/pulumi/pkg/v2/backend/display"
+	"github.com/pulumi/pulumi/pkg/v2/backend/filestate"
+	"github.com/pulumi/pulumi/pkg/v2/backend/httpstate/client"
+	"github.com/pulumi/pulumi/pkg/v2/engine"
+	"github.com/pulumi/pulumi/pkg/v2/operations"
+	"github.com/pulumi/pulumi/pkg/v2/resource/deploy"
+	"github.com/pulumi/pulumi/pkg/v2/secrets"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/apitype"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/diag"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/diag/colors"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource/config"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/tokens"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/cmdutil"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/contract"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/logging"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/result"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/util/retry"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/workspace"
 )
 
 const (
-	// PulumiCloudURL is the Cloud URL used if no environment or explicit cloud is chosen.
-	PulumiCloudURL = "https://" + defaultAPIDomainPrefix + "pulumi.com"
-	// defaultAPIDomainPrefix is the assumed Cloud URL prefix for typical Pulumi Cloud API endpoints.
-	defaultAPIDomainPrefix = "api."
-	// defaultConsoleDomainPrefix is the assumed Cloud URL prefix typically used for the Pulumi Console.
-	defaultConsoleDomainPrefix = "app."
-
 	// defaultAPIEnvVar can be set to override the default cloud chosen, if `--cloud` is not present.
 	defaultURLEnvVar = "PULUMI_API"
 	// AccessTokenEnvVar is the environment variable used to bypass a prompt on login.
 	AccessTokenEnvVar = "PULUMI_ACCESS_TOKEN"
+)
+
+// Name validation rules enforced by the Pulumi Service.
+var (
+	stackOwnerRegexp          = regexp.MustCompile("^[a-zA-Z0-9][a-zA-Z0-9-_]{1,38}[a-zA-Z0-9]$")
+	stackNameAndProjectRegexp = regexp.MustCompile("^[A-Za-z0-9_.-]{1,100}$")
 )
 
 // DefaultURL returns the default cloud URL.  This may be overridden using the PULUMI_API environment
@@ -118,6 +117,9 @@ type cloudBackend struct {
 	client         *client.Client
 	currentProject *workspace.Project
 }
+
+// Assert we implement the backend.Backend and backend.SpecificDeploymentExporter interfaces.
+var _ backend.SpecificDeploymentExporter = &cloudBackend{}
 
 // New creates a new Pulumi backend for the given cloud API URL and token.
 func New(d diag.Sink, cloudURL string) (Backend, error) {
@@ -349,7 +351,7 @@ func WelcomeUser(opts display.Options) {
 
   %s
 
-  Pulumi  helps you create, deploy, and manage infrastructure on any cloud using
+  Pulumi helps you create, deploy, and manage infrastructure on any cloud using
   your favorite language. You can get started today with Pulumi at:
 
       https://www.pulumi.com/docs/get-started/
@@ -425,10 +427,18 @@ func (b *cloudBackend) parsePolicyPackReference(s string) (backend.PolicyPackRef
 		policyPackName = split[1]
 	default:
 		return nil, errors.Errorf("could not parse policy pack name '%s'; must be of the form "+
-			"<orgName>/<policyPackName>", s)
+			"<org-name>/<policy-pack-name>", s)
 	}
 
-	return newCloudBackendPolicyPackReference(orgName, tokens.QName(policyPackName)), nil
+	if orgName == "" {
+		currentUser, userErr := b.CurrentUser()
+		if userErr != nil {
+			return nil, userErr
+		}
+		orgName = currentUser
+	}
+
+	return newCloudBackendPolicyPackReference(b.CloudConsoleURL(), orgName, tokens.QName(policyPackName)), nil
 }
 
 func (b *cloudBackend) GetPolicyPack(ctx context.Context, policyPack string,
@@ -446,10 +456,18 @@ func (b *cloudBackend) GetPolicyPack(ctx context.Context, policyPack string,
 	apiToken := account.AccessToken
 
 	return &cloudPolicyPack{
-		ref: newCloudBackendPolicyPackReference(
+		ref: newCloudBackendPolicyPackReference(b.CloudConsoleURL(),
 			policyPackRef.OrgName(), policyPackRef.Name()),
 		b:  b,
 		cl: client.NewClient(b.CloudURL(), apiToken, d)}, nil
+}
+
+func (b *cloudBackend) ListPolicyGroups(ctx context.Context, orgName string) (apitype.ListPolicyGroupsResponse, error) {
+	return b.client.ListPolicyGroups(ctx, orgName)
+}
+
+func (b *cloudBackend) ListPolicyPacks(ctx context.Context, orgName string) (apitype.ListPolicyPacksResponse, error) {
+	return b.client.ListPolicyPacks(ctx, orgName)
 }
 
 // SupportsOrganizations tells whether a user can belong to multiple organizations in this backend.
@@ -457,49 +475,139 @@ func (b *cloudBackend) SupportsOrganizations() bool {
 	return true
 }
 
-func (b *cloudBackend) ParseStackReference(s string) (backend.StackReference, error) {
-	split := strings.Split(s, "/")
-	var owner string
-	var projectName string
-	var stackName string
+// qualifiedStackReference describes a qualified stack on the Pulumi Service. The Owner or Project
+// may be "" if unspecified, e.g. "pulumi/production" specifies the Owner and Name, but not the
+// Project. We infer the missing data and try to make things work as best we can in ParseStackReference.
+type qualifiedStackReference struct {
+	Owner   string
+	Project string
+	Name    string
+}
 
+// parseStackName parses the stack name into a potentially qualifiedStackReference. Any omitted
+// portions will be left as "". For example:
+//
+// "alpha"            - will just set the Name, but ignore Owner and Project.
+// "alpha/beta"       - will set the Owner and Name, but not Project.
+// "alpha/beta/gamma" - will set Owner, Name, and Project.
+func (b *cloudBackend) parseStackName(s string) (qualifiedStackReference, error) {
+	var q qualifiedStackReference
+
+	split := strings.Split(s, "/")
 	switch len(split) {
 	case 1:
-		stackName = split[0]
+		q.Name = split[0]
 	case 2:
-		owner = split[0]
-		stackName = split[1]
+		q.Owner = split[0]
+		q.Name = split[1]
 	case 3:
-		owner = split[0]
-		projectName = split[1]
-		stackName = split[2]
+		q.Owner = split[0]
+		q.Project = split[1]
+		q.Name = split[2]
 	default:
-		return nil, errors.Errorf("could not parse stack name '%s'", s)
+		return qualifiedStackReference{}, errors.Errorf("could not parse stack name '%s'", s)
 	}
 
-	if owner == "" {
+	return q, nil
+}
+
+func (b *cloudBackend) ParseStackReference(s string) (backend.StackReference, error) {
+	// Parse the input as a qualified stack name.
+	qualifiedName, err := b.parseStackName(s)
+	if err != nil {
+		return nil, err
+	}
+
+	// If the provided stack name didn't include the Owner or Project, infer them from the
+	// local environment.
+	if qualifiedName.Owner == "" {
 		currentUser, userErr := b.CurrentUser()
 		if userErr != nil {
 			return nil, userErr
 		}
-		owner = currentUser
+		qualifiedName.Owner = currentUser
 	}
 
-	if projectName == "" {
+	if qualifiedName.Project == "" {
 		currentProject, projectErr := workspace.DetectProject()
 		if projectErr != nil {
 			return nil, projectErr
 		}
 
-		projectName = currentProject.Name.String()
+		qualifiedName.Project = currentProject.Name.String()
 	}
 
 	return cloudBackendReference{
-		owner:   owner,
-		project: projectName,
-		name:    tokens.QName(stackName),
+		owner:   qualifiedName.Owner,
+		project: qualifiedName.Project,
+		name:    tokens.QName(qualifiedName.Name),
 		b:       b,
 	}, nil
+}
+
+func (b *cloudBackend) ValidateStackName(s string) error {
+	qualifiedName, err := b.parseStackName(s)
+	if err != nil {
+		return err
+	}
+
+	// The Pulumi Service enforces specific naming restrictions for organizations,
+	// projects, and stacks. Though ignore any values that need to be inferred later.
+	if qualifiedName.Owner != "" {
+		if err := validateOwnerName(qualifiedName.Owner); err != nil {
+			return err
+		}
+	}
+
+	if qualifiedName.Project != "" {
+		if err := validateProjectName(qualifiedName.Project); err != nil {
+			return err
+		}
+	}
+
+	return validateStackName(qualifiedName.Name)
+}
+
+// validateOwnerName checks if a stack owner name is valid. An "owner" is simply the namespace
+// a stack may exist within, which for the Pulumi Service is the user account or organization.
+func validateOwnerName(s string) error {
+	if !stackOwnerRegexp.MatchString(s) {
+		return errors.New("invalid stack owner")
+	}
+	return nil
+}
+
+// validateStackName checks if a stack name is valid, returning a user-suitable error if needed.
+func validateStackName(s string) error {
+	if len(s) > 100 {
+		return errors.New("stack names must be less than 100 characters")
+	}
+	if !stackNameAndProjectRegexp.MatchString(s) {
+		return errors.New("stack names may only contain alphanumeric, hyphens, underscores, and periods")
+	}
+	return nil
+}
+
+// validateProjectName checks if a project name is valid, returning a user-suitable error if needed.
+//
+// NOTE: Be careful when requiring a project name be valid. The Pulumi.yaml file may contain
+// an invalid project name like "r@bid^W0MBAT!!", but we try to err on the side of flexibility by
+// implicitly "cleaning" the project name before we send it to the Pulumi Service. So when we go
+// to make HTTP requests, we use a more palitable name like "r_bid_W0MBAT__".
+//
+// The projects canonical name will be the sanitized "r_bid_W0MBAT__" form, but we do not require the
+// Pulumi.yaml file be updated.
+//
+// So we should only call validateProject name when creating _new_ stacks or creating _new_ projects.
+// We should not require that project names be valid when reading what is in the current workspace.
+func validateProjectName(s string) error {
+	if len(s) > 100 {
+		return errors.New("project names must be less than 100 characters")
+	}
+	if !stackNameAndProjectRegexp.MatchString(s) {
+		return errors.New("project names may only contain alphanumeric, hyphens, underscores, and periods")
+	}
+	return nil
 }
 
 // CloudConsoleURL returns a link to the cloud console with the given path elements.  If a console link cannot be
@@ -589,9 +697,16 @@ func (b *cloudBackend) CreateStack(
 
 	apistack, err := b.client.CreateStack(ctx, stackID, tags)
 	if err != nil {
-		// If the status is 409 Conflict (stack already exists), return StackAlreadyExistsError.
+		// Wire through well-known error types.
 		if errResp, ok := err.(*apitype.ErrorResponse); ok && errResp.Code == http.StatusConflict {
-			return nil, &backend.StackAlreadyExistsError{StackName: stackID.Stack}
+			// A 409 error response is returned when per-stack organizations are over their limit,
+			// so we need to look at the message to differentiate.
+			if strings.Contains(errResp.Message, "already exists") {
+				return nil, &backend.StackAlreadyExistsError{StackName: stackID.String()}
+			}
+			if strings.Contains(errResp.Message, "you are using") {
+				return nil, &backend.OverStackLimitError{Message: errResp.Message}
+			}
 		}
 		return nil, err
 	}
@@ -665,11 +780,16 @@ func (b *cloudBackend) RenameStack(ctx context.Context, stack backend.Stack, new
 		return err
 	}
 
-	// Transferring stack ownership is available to Pulumi admins, but isn't quite ready
-	// for general use yet.
 	if stackID.Owner != newIdentity.Owner {
+		url := "."
+
+		if consoleURL, err := b.StackConsoleURL(stack.Ref()); err == nil {
+			url = ":\n" + consoleURL + "/settings/options"
+		}
 		errMsg := "You cannot transfer stack ownership via a rename. If you wish to transfer ownership\n" +
-			"of a stack to another organization, please contact support@pulumi.com."
+			"of a stack to another organization, you can do so in the Pulumi Console by going to the\n" +
+			"\"Settings\" page of the stack and then clicking the \"Transfer Stack\" button" + url
+
 		return errors.Errorf(errMsg)
 	}
 
@@ -702,9 +822,13 @@ func (b *cloudBackend) Destroy(ctx context.Context, stack backend.Stack,
 	return backend.PreviewThenPromptThenExecute(ctx, apitype.DestroyUpdate, stack, op, b.apply)
 }
 
-func (b *cloudBackend) Query(ctx context.Context, stack backend.Stack,
+func (b *cloudBackend) Watch(ctx context.Context, stack backend.Stack,
 	op backend.UpdateOperation) result.Result {
-	return b.query(ctx, stack, op, nil /*events*/)
+	return backend.Watch(ctx, b, stack, op, b.apply)
+}
+
+func (b *cloudBackend) Query(ctx context.Context, op backend.QueryOperation) result.Result {
+	return b.query(ctx, op, nil /*events*/)
 }
 
 func (b *cloudBackend) createAndStartUpdate(
@@ -741,7 +865,7 @@ func (b *cloudBackend) createAndStartUpdate(
 	//
 	for _, policy := range reqdPolicies {
 		op.Opts.Engine.RequiredPolicies = append(
-			op.Opts.Engine.RequiredPolicies, newCloudRequiredPolicy(b.client, policy))
+			op.Opts.Engine.RequiredPolicies, newCloudRequiredPolicy(b.client, policy, update.Owner))
 	}
 
 	// Start the update. We use this opportunity to pass new tags to the service, to pick up any
@@ -774,7 +898,7 @@ func (b *cloudBackend) apply(
 
 	actionLabel := backend.ActionLabel(kind, opts.DryRun)
 
-	if !op.Opts.Display.JSONDisplay {
+	if !(op.Opts.Display.JSONDisplay || op.Opts.Display.Type == display.DisplayWatch) {
 		// Print a banner so it's clear this is going to the cloud.
 		fmt.Printf(op.Opts.Display.Color.Colorize(
 			colors.SpecHeadline+"%s (%s):"+colors.Reset+"\n"), actionLabel, stack.Ref())
@@ -810,62 +934,10 @@ func (b *cloudBackend) apply(
 
 // query executes a query program against the resource outputs of a stack hosted in the Pulumi
 // Cloud.
-func (b *cloudBackend) query(
-	ctx context.Context, stack backend.Stack, op backend.UpdateOperation,
+func (b *cloudBackend) query(ctx context.Context, op backend.QueryOperation,
 	callerEventsOpt chan<- engine.Event) result.Result {
 
-	stackRef := stack.Ref()
-
-	q, err := b.newQuery(ctx, stackRef, op)
-	if err != nil {
-		return result.FromError(err)
-	}
-
-	// Render query output to CLI.
-	displayEvents := make(chan engine.Event)
-	displayDone := make(chan bool)
-	go display.ShowQueryEvents("running query", displayEvents, displayDone, op.Opts.Display)
-
-	// The engineEvents channel receives all events from the engine, which we then forward onto other
-	// channels for actual processing. (displayEvents and callerEventsOpt.)
-	engineEvents := make(chan engine.Event)
-	eventsDone := make(chan bool)
-	go func() {
-		for e := range engineEvents {
-			displayEvents <- e
-			if callerEventsOpt != nil {
-				callerEventsOpt <- e
-			}
-		}
-
-		close(eventsDone)
-	}()
-
-	// Depending on the action, kick off the relevant engine activity.  Note that we don't immediately check and
-	// return error conditions, because we will do so below after waiting for the display channels to close.
-	cancellationScope := op.Scopes.NewScope(engineEvents, true /*dryRun*/)
-	engineCtx := &engine.Context{
-		Cancel:        cancellationScope.Context(),
-		Events:        engineEvents,
-		BackendClient: httpstateBackendClient{backend: b},
-	}
-	if parentSpan := opentracing.SpanFromContext(ctx); parentSpan != nil {
-		engineCtx.ParentSpan = parentSpan.Context()
-	}
-
-	res := engine.Query(engineCtx, q, op.Opts.Engine)
-
-	// Wait for dependent channels to finish processing engineEvents before closing.
-	<-displayDone
-	cancellationScope.Close() // Don't take any cancellations anymore, we're shutting down.
-	close(engineEvents)
-
-	// Make sure that the goroutine writing to displayEvents and callerEventsOpt
-	// has exited before proceeding
-	<-eventsDone
-	close(displayEvents)
-
-	return res
+	return backend.RunQuery(ctx, b, op, callerEventsOpt, b.newQuery)
 }
 
 func (b *cloudBackend) runEngineAction(
@@ -1060,10 +1132,18 @@ func convertConfig(apiConfig map[string]apitype.ConfigValue) (config.Map, error)
 		if err != nil {
 			return nil, err
 		}
-		if rawV.Secret {
-			c[k] = config.NewSecureValue(rawV.String)
+		if rawV.Object {
+			if rawV.Secret {
+				c[k] = config.NewSecureObjectValue(rawV.String)
+			} else {
+				c[k] = config.NewObjectValue(rawV.String)
+			}
 		} else {
-			c[k] = config.NewValue(rawV.String)
+			if rawV.Secret {
+				c[k] = config.NewSecureValue(rawV.String)
+			} else {
+				c[k] = config.NewValue(rawV.String)
+			}
 		}
 	}
 	return c, nil
@@ -1081,17 +1161,32 @@ func (b *cloudBackend) GetLogs(ctx context.Context, stack backend.Stack, cfg bac
 
 func (b *cloudBackend) ExportDeployment(ctx context.Context,
 	stack backend.Stack) (*apitype.UntypedDeployment, error) {
-	return b.exportDeployment(ctx, stack.Ref())
+	return b.exportDeployment(ctx, stack.Ref(), nil /* latest */)
 }
 
-func (b *cloudBackend) exportDeployment(ctx context.Context,
-	stackRef backend.StackReference) (*apitype.UntypedDeployment, error) {
+func (b *cloudBackend) ExportDeploymentForVersion(
+	ctx context.Context, stack backend.Stack, version string) (*apitype.UntypedDeployment, error) {
+	// The Pulumi Console defines versions as a positive integer. Parse the provided version string and
+	// ensure it is valid.
+	//
+	// The first stack update version is 1, and monotonically increasing from there.
+	versionNumber, err := strconv.Atoi(version)
+	if err != nil || versionNumber <= 0 {
+		return nil, errors.Errorf("%q is not a valid stack version. It should be a positive integer.", version)
+	}
+
+	return b.exportDeployment(ctx, stack.Ref(), &versionNumber)
+}
+
+// exportDeployment exports the checkpoint file for a stack, optionally getting a previous version.
+func (b *cloudBackend) exportDeployment(
+	ctx context.Context, stackRef backend.StackReference, version *int) (*apitype.UntypedDeployment, error) {
 	stack, err := b.getCloudStackIdentifier(stackRef)
 	if err != nil {
 		return nil, err
 	}
 
-	deployment, err := b.client.ExportStackDeployment(ctx, stack)
+	deployment, err := b.client.ExportStackDeployment(ctx, stack, version)
 	if err != nil {
 		return nil, err
 	}

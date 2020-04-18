@@ -20,11 +20,11 @@ import (
 	"github.com/blang/semver"
 	"github.com/pkg/errors"
 
-	"github.com/pulumi/pulumi/pkg/diag"
-	"github.com/pulumi/pulumi/pkg/resource"
-	"github.com/pulumi/pulumi/pkg/resource/plugin"
-	"github.com/pulumi/pulumi/pkg/tokens"
-	"github.com/pulumi/pulumi/pkg/workspace"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/diag"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/resource/plugin"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/tokens"
+	"github.com/pulumi/pulumi/sdk/v2/go/common/workspace"
 )
 
 type LoadProviderFunc func() (plugin.Provider, error)
@@ -180,7 +180,8 @@ func (host *pluginHost) GetRequiredPlugins(info plugin.ProgInfo,
 	return nil, nil
 }
 
-func (host *pluginHost) PolicyAnalyzer(name tokens.QName, path string) (plugin.Analyzer, error) {
+func (host *pluginHost) PolicyAnalyzer(name tokens.QName, path string,
+	opts *plugin.PolicyAnalyzerOptions) (plugin.Analyzer, error) {
 	return nil, errors.New("unsupported")
 }
 

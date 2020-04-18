@@ -14,7 +14,7 @@
 
 import * as asset from "../asset";
 import * as log from "../log";
-import { Input, Inputs, Output } from "../output";
+import { getAllResources, Input, Inputs, isUnknown, Output, unknown } from "../output";
 import { ComponentResource, CustomResource, Resource } from "../resource";
 import { debuggablePromise, errorString } from "./debuggable";
 import { excessiveDebugOutput, isDryRun, monitorSupportsSecrets } from "./settings";
@@ -69,7 +69,8 @@ export function transferProperties(onto: Resource, label: string, props: Inputs)
                 `transferIsStable(${label}, ${k}, ${propString})`),
             debuggablePromise(
                 new Promise<boolean>(resolve => resolveIsSecret = resolve),
-                `transferIsSecret(${label}, ${k}, ${props[k]})`));
+                `transferIsSecret(${label}, ${k}, ${props[k]})`),
+            Promise.resolve(onto));
     }
 
     return resolvers;
@@ -179,20 +180,10 @@ export function resolveProperties(
         value = unwrapRpcSecret(value);
 
         try {
-            // If either we are performing a real deployment, or this is a stable property value, we
-            // can propagate its final value.  Otherwise, it must be undefined, since we don't know
-            // if it's final.
-            if (!isDryRun()) {
-                // normal 'pulumi up'.  resolve the output with the value we got back
-                // from the engine.  That output can always run its .apply calls.
-                resolve(value, true, isSecret);
-            }
-            else {
-                // We're previewing. If the engine was able to give us a reasonable value back,
-                // then use it. Otherwise, inform the Output that the value isn't known.
-                const isKnown = value !== undefined;
-                resolve(value, isKnown, isSecret);
-            }
+            // If the value the engine handed back is or contains an unknown value, the resolver will mark its value as
+            // unknown automatically, so we just pass true for isKnown here. Note that unknown values will only be
+            // present during previews (i.e. isDryRun() will be true).
+            resolve(value, /*isKnown*/ true, isSecret);
         }
         catch (err) {
             throw new Error(
@@ -279,7 +270,11 @@ export async function serializeProperty(ctx: string, prop: Input<any>, dependent
             log.debug(`Serialize property [${ctx}]: Output<T>`);
         }
 
-        for (const resource of prop.resources()) {
+        // handle serializing both old-style outputs (with sync resources) and new-style outputs
+        // (with async resources).
+
+        const propResources = await getAllResources(prop);
+        for (const resource of propResources) {
             dependentResources.add(resource);
         }
 
@@ -307,6 +302,10 @@ export async function serializeProperty(ctx: string, prop: Input<any>, dependent
             };
         }
         return value;
+    }
+
+    if (isUnknown(prop)) {
+        return unknownValue;
     }
 
     if (CustomResource.isInstance(prop)) {
@@ -398,13 +397,13 @@ export function deserializeProperty(prop: any): any {
         throw new Error("unexpected undefined property value during deserialization");
     }
     else if (prop === unknownValue) {
-        return undefined;
+        return isDryRun() ? unknown : undefined;
     }
     else if (prop === null || typeof prop === "boolean" || typeof prop === "number" || typeof prop === "string") {
         return prop;
     }
     else if (prop instanceof Array) {
-        // We can just deserialize all the elements of the underyling array and return it.
+        // We can just deserialize all the elements of the underlying array and return it.
         // However, we want to push secretness up to the top level (since we can't set sub-properties to secret)
         // values since they are not typed as Output<T>.
         let hadSecret = false;
