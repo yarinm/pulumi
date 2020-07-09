@@ -43,14 +43,6 @@ Inputs = Mapping[str, Input[Any]]
 
 
 class Output(Generic[T]):
-    """
-    Output helps encode the relationship between Resources in a Pulumi application. Specifically an
-    Output holds onto a piece of Data and the Resource it was generated from. An Output value can
-    then be provided when constructing new Resources, allowing that new Resource to know both the
-    value as well as the Resource the value came from.  This allows for a precise 'Resource
-    dependency graph' to be created, which properly tracks the relationship between resources.
-    """
-
     _is_known: Awaitable[bool]
     """
     Whether or not this 'Output' should actually perform .apply calls.  During a preview,
@@ -80,6 +72,18 @@ class Output(Generic[T]):
     def __init__(self, resources: Union[Awaitable[Set['Resource']], Set['Resource']],
                  future: Awaitable[T], is_known: Awaitable[bool],
                  is_secret: Optional[Awaitable[bool]] = None) -> None:
+        """
+        Output helps encode the relationship between Resources in a Pulumi application. Specifically an
+        Output holds onto a piece of Data and the Resource it was generated from. An Output value can
+        then be provided when constructing new Resources, allowing that new Resource to know both the
+        value as well as the Resource the value came from.  This allows for a precise 'Resource
+        dependency graph' to be created, which properly tracks the relationship between resources.
+
+        :param resources: The list of resources that this output value depends on.
+        :param future: Future that actually produces the concrete value of this output.
+        :param is_known: Whether or not this 'Output' should actually perform .apply calls.
+        :param is_secret: Whether or not this 'Output' should be treated as containing secret data.
+        """
         is_known = asyncio.ensure_future(is_known)
         future = asyncio.ensure_future(future)
 
@@ -106,8 +110,8 @@ class Output(Generic[T]):
         return self._resources
 
     def future(self, with_unknowns: Optional[bool] = None) -> Awaitable[Optional[T]]:
-        # If the caller did not explicitly ask to see unknown values and the value of this output contains unnkowns,
-        # return None. This preserves compatibility with earlier versios of the Pulumi SDK.
+        # If the caller did not explicitly ask to see unknown values and the value of this output contains unknowns,
+        # return None. This preserves compatibility with earlier versions of the Pulumi SDK.
         async def get_value() -> Optional[T]:
             val = await self._future
             return None if not with_unknowns and contains_unknowns(val) else val

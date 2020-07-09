@@ -16,10 +16,8 @@ from typing import Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from .resource import Resource, ProviderResource
 
+
 class InvokeOptions:
-    """
-    InvokeOptions is a bag of options that control the behavior of a call to runtime.invoke.
-    """
     parent: Optional['Resource']
     """
     An optional parent to use for default options for this invoke (e.g. the default provider to use).
@@ -40,6 +38,8 @@ class InvokeOptions:
                  provider: Optional['ProviderResource'] = None,
                  version: Optional[str] = "") -> None:
         """
+        InvokeOptions is a bag of options that control the behavior of a call to runtime.invoke.
+
         :param Optional[Resource] parent: An optional parent to use for default options for this invoke (e.g. the
                default provider to use).
         :param Optional[ProviderResource] provider: An optional provider to use for this invocation. If no provider is

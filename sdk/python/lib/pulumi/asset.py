@@ -27,41 +27,55 @@ class Asset:
 
 
 class FileAsset(Asset):
-    """
-    A FileAsset is a kind of asset produced from a given path to a file on
-    the local filesystem.
-    """
     path: str
+    """
+    Path to a file in the local filesystem.
+    """
 
     def __init__(self, path: Union[str, PathLike]) -> None:
+        """
+        A FileAsset is a kind of asset produced from a given path to a file on
+        the local filesystem.
 
+        :param path: Path to a file in the local filesystem.
+        """
         if not isinstance(path, (str, PathLike)):
             raise TypeError("FileAsset path must be a string or os.PathLike")
         self.path = fspath(path)
 
 
 class StringAsset(Asset):
-    """
-    A StringAsset is a kind of asset produced from an in-memory UTF-8 encoded string.
-    """
     text: str
+    """
+    An in-memory UTF-8 encoded string.
+    """
 
     def __init__(self, text: str) -> None:
+        """
+        A StringAsset is a kind of asset produced from an in-memory UTF-8 encoded string.
+
+        :param text: An in-memory UTF-8 encoded string.
+        """
         if not isinstance(text, str):
             raise TypeError("StringAsset data must be a string")
         self.text = text
 
 
 class RemoteAsset(Asset):
-    """
-    A RemoteAsset is a kind of asset produced from a given URI string. The URI's scheme
-    dictates the protocol for fetching contents: "file://" specifies a local file, "http://"
-    and "https://" specify HTTP and HTTPS, respectively. Note that specific providers may recognize
-    alternative schemes; this is merely the base-most set that all providers support.
-    """
     uri: str
+    """
+    URI for the asset.
+    """
 
     def __init__(self, uri: str) -> None:
+        """
+        A RemoteAsset is a kind of asset produced from a given URI string. The URI's scheme
+        dictates the protocol for fetching contents: "file://" specifies a local file, "http://"
+        and "https://" specify HTTP and HTTPS, respectively. Note that specific providers may recognize
+        alternative schemes; this is merely the base-most set that all providers support.
+
+        :param uri: URI for the asset.
+        """
         if not isinstance(uri, str):
             raise TypeError("RemoteAsset URI must be a string")
         self.uri = uri
@@ -74,12 +88,17 @@ class Archive:
 
 
 class AssetArchive(Archive):
-    """
-    An AssetArchive is an archive created from an in-memory collection of named assets or other archives.
-    """
     assets: Dict[str, Union[Asset, Archive]]
+    """
+    A collection of named assets.
+    """
 
     def __init__(self, assets: Dict[str, Union[Asset, Archive]]) -> None:
+        """
+        An AssetArchive is an archive created from an in-memory collection of named assets or other archives.
+
+        :param assets: A collection of named assets.
+        """
         if not isinstance(assets, dict):
             raise TypeError("AssetArchive assets must be a dictionary")
         for k, v in assets.items():
@@ -91,27 +110,38 @@ class AssetArchive(Archive):
 
 
 class FileArchive(Archive):
-    """
-    A FileArchive is a file-based archive, or collection of file-based assets.  This can be
-    a raw directory or a single archive file in one of the supported formats (.tar, .tar.gz, or .zip).
-    """
     path: str
+    """
+    The path to the raw directory or a single archive file in one of the supported formats (.tar, .tar.gz, or .zip).
+    """
 
     def __init__(self, path: str) -> None:
+        """
+        A FileArchive is a file-based archive, or collection of file-based assets.  This can be
+        a raw directory or a single archive file in one of the supported formats (.tar, .tar.gz, or .zip).
+
+        :param path: The path to the raw directory or a single archive file in one of the supported formats
+        (.tar, .tar.gz, or .zip).
+        """
         if not isinstance(path, str):
             raise TypeError("FileArchive path must be a string")
         self.path = path
 
 
 class RemoteArchive(Archive):
-    """
-    A RemoteArchive is a file-based archive fetched from a remote location.  The URI's scheme dictates
-    the protocol for fetching contents: "file://" specifies a local file, "http://" and "https://"
-    specify HTTP and HTTPS, respectively, and specific providers may recognize custom schemes.
-    """
     uri: str
+    """
+    URI for the remote archive.
+    """
 
     def __init__(self, uri: str) -> None:
+        """
+        A RemoteArchive is a file-based archive fetched from a remote location. The URI's scheme dictates
+        the protocol for fetching contents: "file://" specifies a local file, "http://" and "https://"
+        specify HTTP and HTTPS, respectively, and specific providers may recognize custom schemes.
+
+        :param uri: URI for the remote archive.
+        """
         if not isinstance(uri, str):
             raise TypeError("RemoteArchive URI must be a string")
         self.uri = uri

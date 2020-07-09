@@ -23,22 +23,21 @@ from .output import Output
 from .runtime.config import get_config
 from .metadata import get_project
 
-class Config:
-    """
-    Config is a bag of related configuration state.  Each bag contains any number of configuration variables, indexed by
-    simple keys, and each has a name that uniquely identifies it; two bags with different names do not share values for
-    variables that otherwise share the same key.  For example, a bag whose name is `pulumi:foo`, with keys `a`, `b`,
-    and `c`, is entirely separate from a bag whose name is `pulumi:bar` with the same simple key names.  Each key has a
-    fully qualified names, such as `pulumi:foo:a`, ..., and `pulumi:bar:a`, respectively.
-    """
 
+class Config:
     name: str
     """
     The configuration bag's logical name that uniquely identifies it.  The default is the name of the current project.
     """
 
-    def __init__(self, name: Optional[str] = None) -> None:
+    def __init__(self, name: str = None) -> None:
         """
+        Config is a bag of related configuration state.  Each bag contains any number of configuration variables,
+        indexed by simple keys, and each has a name that uniquely identifies it; two bags with different names do not
+        share values for variables that otherwise share the same key.  For example, a bag whose name is `pulumi:foo`,
+        with keys `a`, `b`, and `c`, is entirely separate from a bag whose name is `pulumi:bar` with the same simple key
+        names.  Each key has a fully qualified names, such as `pulumi:foo:a`, ..., and `pulumi:bar:a`, respectively.
+
         :param str name: The configuration bag's logical name that uniquely identifies it.  If not provided, the name
                of the current project is used.
         """
@@ -343,10 +342,6 @@ class Config:
 
 
 class ConfigTypeError(errors.RunError):
-    """
-    Indicates a configuration value is of the wrong type.
-    """
-
     key: str
     """
     The name of the key whose value was ill-typed.
@@ -363,6 +358,13 @@ class ConfigTypeError(errors.RunError):
     """
 
     def __init__(self, key: str, value: str, expect_type: str) -> None:
+        """
+        Indicates a configuration value is of the wrong type.
+
+        :param str key: The name of the key whose value was ill-typed..
+        :param str value: The ill-typed value.
+        :param str expect_type: The expected of this value.
+        """
         self.key = key
         self.value = value
         self.expect_type = expect_type
@@ -371,16 +373,17 @@ class ConfigTypeError(errors.RunError):
 
 
 class ConfigMissingError(errors.RunError):
-    """
-    Indicates a configuration value is missing.
-    """
-
     key: str
     """
     The name of the missing configuration key.
     """
 
     def __init__(self, key: str) -> None:
+        """
+        Indicates a configuration value is missing.
+
+        :param str key: The name of the missing configuration key.
+        """
         self.key = key
         super(ConfigMissingError, self).__init__(
             "Missing required configuration variable '%s'\n" % key +
