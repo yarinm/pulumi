@@ -20,6 +20,10 @@ _(none)_
   (fixes [#4103](https://github.com/pulumi/pulumi/issues/4103))
   [#5191](https://github.com/pulumi/pulumi/pull/5191)
 
+- Add an import command to the Pulumi CLI. This command can be used to import existing resources
+  into a Pulumi stack.
+  [#4765](https://github.com/pulumi/pulumi/pull/4765)
+
 ## 2.9.1 (2020-08-127
 
 - Python SDK: Avoid raising an error when an output has a type annotation of Any
