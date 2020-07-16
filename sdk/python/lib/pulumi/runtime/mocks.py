@@ -38,6 +38,7 @@ def test(fn):
         _sync_await(run_pulumi_func(lambda: _sync_await(Output.from_input(fn(*args, **kwargs)).future())))
     return wrapper
 
+
 class Mocks(ABC):
     """
     Mocks is an abstract class that allows subclasses to replace operations normally implemented by the Pulumi engine with

@@ -20,11 +20,6 @@ from .resource import CustomResource, ResourceOptions
 
 
 class StackReference(CustomResource):
-    """
-    Manages a reference to a Pulumi stack. The referenced stack's outputs are available via its "outputs" property or
-    the "output" method.
-    """
-
     name: Output[str]
     """
     The name of the referenced stack.
@@ -45,6 +40,9 @@ class StackReference(CustomResource):
                  stack_name: Optional[str] = None,
                  opts: Optional[ResourceOptions] = None) -> None:
         """
+        Manages a reference to a Pulumi stack. The referenced stack's outputs are available via its "outputs" property
+        or the "output" method.
+
         :param str name: The unique name of the stack reference.
         :param Optional[str] stack_name: The name of the stack to reference. If not provided, defaults to the name of
                this resource.

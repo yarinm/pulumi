@@ -42,6 +42,7 @@ if not sys.platform.startswith('win32'):
     from google.protobuf.pyext._message import SetAllowOversizeProtos  # pylint: disable-msg=E0611
     SetAllowOversizeProtos(True)
 
+
 class InvokeResult:
     """
     InvokeResult is a helper type that wraps a prompt value in an Awaitable.
@@ -58,6 +59,7 @@ class InvokeResult:
         return self.value
 
     __iter__ = __await__
+
 
 def invoke(tok: str, props: 'Inputs', opts: InvokeOptions = None) -> InvokeResult:
     """
@@ -93,7 +95,7 @@ def invoke(tok: str, props: 'Inputs', opts: InvokeOptions = None) -> InvokeResul
                 return monitor.Invoke(req)
             except grpc.RpcError as exn:
                 # gRPC-python gets creative with their exceptions. grpc.RpcError as a type is useless;
-                # the usefullness come from the fact that it is polymorphically also a grpc.Call and thus has
+                # the usefulness come from the fact that it is polymorphically also a grpc.Call and thus has
                 # the .code() member. Pylint doesn't know this because it's not known statically.
                 #
                 # Neither pylint nor I are the only ones who find this confusing:

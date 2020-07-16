@@ -105,31 +105,6 @@ semantics.
 
 
 class Alias:
-    """
-    Alias is a partial description of prior named used for a resource. It can be processed in the
-    context of a resource creation to determine what the full aliased URN would be.
-
-    Note there is a semantic difference between attributes being given the `None` value and
-    attributes not being given at all. Specifically, there is a difference between:
-
-    ```ts
-    Alias(name="foo", parent=None) # and
-    Alias(name="foo")
-    ```
-
-    So the first alias means "the original urn had no parent" while the second alias means "use the
-    current parent".
-
-    Note: to indicate that a resource was previously parented by the root stack, it is recommended
-    that you use:
-
-    `aliases=[Alias(parent=pulumi.ROOT_STACK_RESOURCE)]`
-
-    This form is self-descriptive and makes the intent clearer than using:
-
-    `aliases=[Alias(parent=None)]`
-    """
-
     name: Optional[str]
     """
     The previous name of the resource.  If not provided, the current name of the resource is used.
@@ -168,7 +143,31 @@ class Alias:
                  parent: Optional[Union['Resource', 'Input[str]']] = ...,  # type: ignore
                  stack: Optional['Input[str]'] = ...,  # type: ignore
                  project: Optional['Input[str]'] = ...) -> None:  # type: ignore
+        """
+        Alias is a partial description of prior named used for a resource. It can be processed in the
+        context of a resource creation to determine what the full aliased URN would be.
 
+        Note there is a semantic difference between attributes being given the ``None`` value and
+        attributes not being given at all. Specifically, there is a difference between::
+
+            Alias(name="foo", parent=None) # and
+            Alias(name="foo")
+
+        So the first alias means "the original urn had no parent" while the second alias means "use the
+        current parent.
+
+        Note: to indicate that a resource was previously parented by the root stack, it is recommended
+        that you use ``aliases=[Alias(parent=pulumi.ROOT_STACK_RESOURCE)]``.
+
+        This form is self-descriptive
+        and makes the intent clearer than using ``aliases=[Alias(parent=None)]``
+
+        :param name: The previous name of the resource. If not provided, the current name of the resource is used.
+        :param type_: The previous type of the resource. If not provided, the current type of the resource is used.
+        :param parent: The previous parent of the resource. If not provided, the current parent of the resource is used.
+        :param stack: The name of the previous stack of the resource. If not provided, defaults to `pulumi.getStack()`.
+        :param project: The previous project of the resource. If not provided, defaults to `pulumi.getProject()`.
+        """
         self.name = name
         self.type_ = type_
         self.parent = parent
@@ -209,10 +208,6 @@ def collapse_alias_to_urn(
 
 
 class ResourceTransformationArgs:
-    """
-    ResourceTransformationArgs is the argument bag passed to a resource transformation.
-    """
-
     resource: 'Resource'
     """
     The Resource instance that is being transformed.
@@ -244,6 +239,15 @@ class ResourceTransformationArgs:
                  name: str,
                  props: 'Inputs',
                  opts: 'ResourceOptions') -> None:
+        """
+        ResourceTransformationArgs is the argument bag passed to a resource transformation.
+
+        :param resource: The Resource instance that is being transformed.
+        :param type_: The type of the Resource.
+        :param name: The name of the Resource.
+        :param props: The original properties passed to the Resource constructor.
+        :param opts: The original resource options passed to the Resource constructor.
+        """
         self.resource = resource
         self.type_ = type_
         self.name = name
@@ -252,12 +256,6 @@ class ResourceTransformationArgs:
 
 
 class ResourceTransformationResult:
-    """
-    ResourceTransformationResult is the result that must be returned by a resource transformation
-    callback.  It includes new values to use for the `props` and `opts` of the `Resource` in place of
-    the originally provided values.
-    """
-
     props: 'Inputs'
     """
     The new properties to use in place of the original `props`.
@@ -271,6 +269,14 @@ class ResourceTransformationResult:
     def __init__(self,
                  props: 'Inputs',
                  opts: 'ResourceOptions') -> None:
+        """
+        ResourceTransformationResult is the result that must be returned by a resource transformation
+        callback.  It includes new values to use for the `props` and `opts` of the `Resource` in place of
+        the originally provided values.
+
+        :param props: The new properties to use in place of the original `props`.
+        :param opts: The new resource options to use in place of the original `opts`
+        """
         self.props = props
         self.opts = opts
 
@@ -287,10 +293,6 @@ this indicates that the resource will not be transformed.
 
 
 class ResourceOptions:
-    """
-    ResourceOptions is a bag of optional settings that control a resource's behavior.
-    """
-
     parent: Optional['Resource']
     """
     If provided, the currently-constructing resource should be the child of the provided parent
@@ -390,6 +392,8 @@ class ResourceOptions:
                  custom_timeouts: Optional['CustomTimeouts'] = None,
                  transformations: Optional[List[ResourceTransformation]] = None) -> None:
         """
+        ResourceOptions is a bag of optional settings that control a resource's behavior.
+
         :param Optional[Resource] parent: If provided, the currently-constructing resource should be the child of
                the provided parent resource.
         :param Optional[List[Resource]] depends_on: If provided, the currently-constructing resource depends on the
@@ -398,21 +402,22 @@ class ResourceOptions:
         :param Optional[ProviderResource] provider: An optional provider to use for this resource's CRUD operations.
                If no provider is supplied, the default provider for the resource's package will be used. The default
                provider is pulled from the parent's provider bag.
-        :param Optional[Mapping[str,ProviderResource]] providers: An optional set of providers to use for child resources. Keyed
-               by package name (e.g. "aws")
-        :param Optional[bool] delete_before_replace: If provided and True, this resource must be deleted before it is replaced.
-        :param Optional[List[string]] ignore_changes: If provided, a list of property names to ignore for purposes of updates
-               or replacements.
-        :param Optional[List[string]] additional_secret_outputs: If provided, a list of output property names that should
-               also be treated as secret.
+        :param Optional[Mapping[str,ProviderResource]] providers: An optional set of providers to use for child
+               resources. Keyed by package name (e.g. "aws")
+        :param Optional[bool] delete_before_replace: If provided and True, this resource must be deleted before it is
+               replaced.
+        :param Optional[List[string]] ignore_changes: If provided, a list of property names to ignore for purposes of
+               updates or replacements.
+        :param Optional[List[string]] additional_secret_outputs: If provided, a list of output property names that
+               should also be treated as secret.
         :param Optional[str] id: If provided, an existing resource ID to read, rather than create.
-        :param Optional[str] import_: When provided with a resource ID, import indicates that this resource's provider should
-               import its state from the cloud resource with the given ID. The inputs to the resource's constructor must align
-               with the resource's current state. Once a resource has been imported, the import property must be removed from
-               the resource's options.
-        :param Optional[CustomTimeouts] customTimeouts: If provided, a config block for custom timeout information.
-        :param Optional[transformations] transformations: If provided, a list of transformations to apply to this resource
-               during construction.
+        :param Optional[str] import_: When provided with a resource ID, import indicates that this resource's provider
+               should import its state from the cloud resource with the given ID. The inputs to the resource's
+               constructor must align with the resource's current state. Once a resource has been imported, the import
+               property must be removed from the resource's options.
+        :param Optional[CustomTimeouts] custom_timeouts: If provided, a config block for custom timeout information.
+        :param Optional[transformations] transformations: If provided, a list of transformations to apply to this
+               resource during construction.
         """
 
         # Expose 'merge' again this this object, but this time as an instance method.
@@ -557,10 +562,6 @@ def _merge_lists(dest, source):
 # !!! IMPORTANT !!! If you add a new attribute to this type, make sure to verify that merge_options
 # works properly for it.
 class Resource:
-    """
-    Resource represents a class whose CRUD operations are implemented by a provider plugin.
-    """
-
     urn: 'Output[str]'
     """
     The stable, logical URN used to distinctly address a resource, both before and after
@@ -602,6 +603,8 @@ class Resource:
                  props: Optional['Inputs'] = None,
                  opts: Optional[ResourceOptions] = None) -> None:
         """
+        Resource represents a class whose CRUD operations are implemented by a provider plugin.
+
         :param str t: The type of this resource.
         :param str name: The name of this resource.
         :param bool custom: True if this resource is a custom resource.
@@ -842,18 +845,13 @@ class ComponentResource(Resource):
         Register synthetic outputs that a component has initialized, usually by allocating other child
         sub-resources and propagating their resulting property values.
 
-        :param dict output: A dictionary of outputs to associate with this resource.
+        :param dict outputs: A dictionary of outputs to associate with this resource.
         """
         if outputs:
             register_resource_outputs(self, outputs)
 
 
 class ProviderResource(CustomResource):
-    """
-    ProviderResource is a resource that implements CRUD operations for other custom resources. These resources are
-    managed similarly to other resources, including the usual diffing and update semantics.
-    """
-
     package: str
     """
     package is the name of the package this is provider for.  Common examples are "aws" and "azure".
@@ -865,6 +863,9 @@ class ProviderResource(CustomResource):
                  props: Optional[dict] = None,
                  opts: Optional[ResourceOptions] = None) -> None:
         """
+        ProviderResource is a resource that implements CRUD operations for other custom resources. These resources are
+        managed similarly to other resources, including the usual diffing and update semantics.
+
         :param str pkg: The package type of this provider resource.
         :param str name: The name of this resource.
         :param Optional[dict] props: An optional list of input properties to use as inputs for the resource.

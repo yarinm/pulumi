@@ -19,13 +19,6 @@ from .. import log
 
 
 class RPCManager:
-    """
-    RPCManager is responsible for keeping track of RPCs that are dispatched
-    throughout the course of a Pulumi program. It records exceptions that occur
-    when performing RPC calls and keeps track of whether or not there are any
-    outstanding RPCs.
-    """
-
     rpcs: List[Awaitable]
     """
     The active RPCs.
@@ -42,6 +35,12 @@ class RPCManager:
     """
 
     def __init__(self):
+        """
+        RPCManager is responsible for keeping track of RPCs that are dispatched
+        throughout the course of a Pulumi program. It records exceptions that occur
+        when performing RPC calls and keeps track of whether or not there are any
+        outstanding RPCs.
+        """
         self.rpcs = []
         self.unhandled_exception = None
         self.exception_traceback = None

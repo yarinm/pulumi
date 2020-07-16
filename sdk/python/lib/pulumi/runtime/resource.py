@@ -275,6 +275,7 @@ def _read_resource(res: 'CustomResource', ty: str, name: str, props: 'Inputs', o
 
     return _ResourceResult(result_urn, result_id)
 
+
 def read_resource(res: 'CustomResource', ty: str, name: str, props: 'Inputs', opts: 'ResourceOptions') -> None:
     result = _read_resource(res, ty, name, props, opts)
     res.urn = result.urn
@@ -452,6 +453,7 @@ def _register_resource(res: 'Resource',
         "register resource", do_register)())
 
     return _ResourceResult(result_urn, result_id)
+
 
 def register_resource(res: 'Resource', ty: str, name: str, custom: bool, props: 'Inputs', opts: Optional['ResourceOptions']) -> None:
     """
