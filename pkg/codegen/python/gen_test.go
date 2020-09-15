@@ -37,8 +37,7 @@ func TestRelPathToRelImport(t *testing.T) {
 
 func TestGeneratePackage(t *testing.T) {
 	// Read in, decode, and import the schema.
-	schemaBytes, err := ioutil.ReadFile(filepath.Join(
-		"..", "internal", "test", "testdata", "simple-resource-schema.json"))
+	schemaBytes, err := ioutil.ReadFile(filepath.Join("..", "internal", "test", "testdata", "schema-simple.json"))
 	if err != nil {
 		panic(err)
 	}
