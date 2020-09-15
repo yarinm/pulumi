@@ -1030,7 +1030,6 @@ func (t *types) bindType(spec TypeSpec) (Type, error) {
 			t.maps[elementType] = typ
 		}
 		return typ, nil
-	// TODO: add "resource" case?
 	default:
 		return nil, errors.Errorf("unknown type kind %v", spec.Type)
 	}
