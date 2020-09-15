@@ -29,7 +29,6 @@ import (
 
 // TODO:
 // - Providerless packages
-// - Adjustments to accommodate docs + cross-lang packages (e.g references to resources from POD types)
 
 // Type represents a datatype in the Pulumi Schema. Types created by this package are identical if they are
 // equal values.
@@ -609,7 +608,7 @@ type TypeSpec struct {
 	// Ref is a reference to a type in this or another document. For example, the built-in Archive, Asset, and Any
 	// types are referenced as "pulumi.json#/Archive", "pulumi.json#/Asset", and "pulumi.json#/Any", respectively.
 	// A type from this document is referenced as "#/types/pulumi:type:token".
-	// An external resource is referenced as "#/resources/pulumi:type:token".
+	// A resource from this document is referenced as "#/resources/pulumi:type:token".
 	Ref string `json:"$ref,omitempty"`
 	// AdditionalProperties, if set, describes the element type of an "object" (i.e. a string -> value map).
 	AdditionalProperties *TypeSpec `json:"additionalProperties,omitempty"`

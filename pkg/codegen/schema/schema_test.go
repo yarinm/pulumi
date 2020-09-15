@@ -46,24 +46,29 @@ func TestImportSpec(t *testing.T) {
 }
 
 func TestImportResourceRef(t *testing.T) {
-	// Read in, decode, and import the schema.
-	schemaBytes, err := ioutil.ReadFile(
-		filepath.Join("..", "internal", "test", "testdata", "simple-resource-schema.json"))
-	if err != nil {
-		panic(err)
+	tests := []struct {
+		name       string
+		schemaFile string
+		wantErr    bool
+	}{
+		{"valid", "schema-simple.json", false},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Read in, decode, and import the schema.
+			schemaBytes, err := ioutil.ReadFile(
+				filepath.Join("..", "internal", "test", "testdata", tt.schemaFile))
+			assert.NoError(t, err)
 
-	var pkgSpec PackageSpec
-	if err = json.Unmarshal(schemaBytes, &pkgSpec); err != nil {
-		panic(err)
-	}
+			var pkgSpec PackageSpec
+			err = json.Unmarshal(schemaBytes, &pkgSpec)
+			assert.NoError(t, err)
 
-	pkg, err := ImportSpec(pkgSpec, nil)
-	if err != nil {
-		t.Errorf("ImportSpec() error = %v", err)
-	}
-
-	for _, r := range pkg.Resources {
-		assert.NotNil(t, r.Package, "expected resource %s to have an associated Package", r.Token)
+			_, err = ImportSpec(pkgSpec, nil)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ImportSpec() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+		})
 	}
 }

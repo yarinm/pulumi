@@ -41,6 +41,24 @@
       "type": "object"
     }
   },
+  "functions": {
+    "example::argFunction": {
+      "inputs": {
+        "properties": {
+          "arg1": {
+            "type": "string"
+          }
+        }
+      },
+      "outputs": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
   "language": {
     "csharp": {},
     "go": {},
