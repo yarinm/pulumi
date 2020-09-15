@@ -1,0 +1,50 @@
+{
+  "name": "example",
+  "types": {
+    "example::Object": {
+      "properties": {
+        "foo": {
+          "$ref": "#/resources/example::Resource"
+        },
+        "bar": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "resources": {
+    "example::Resource": {
+      "properties": {
+        "bar": {
+          "type": "string"
+        }
+      },
+      "inputProperties": {
+        "bar": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "example::OtherResource": {
+      "properties": {
+        "foo": {
+          "$ref": "#/resources/example::Resource"
+        }
+      },
+      "inputProperties": {
+        "foo": {
+          "$ref": "#/resources/example::Resource"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "language": {
+    "csharp": {},
+    "go": {},
+    "nodejs": {},
+    "python": {}
+  }
+}

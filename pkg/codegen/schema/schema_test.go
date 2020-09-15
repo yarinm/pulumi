@@ -44,3 +44,26 @@ func TestImportSpec(t *testing.T) {
 		assert.NotNil(t, r.Package, "expected resource %s to have an associated Package", r.Token)
 	}
 }
+
+func TestImportResourceRef(t *testing.T) {
+	// Read in, decode, and import the schema.
+	schemaBytes, err := ioutil.ReadFile(
+		filepath.Join("..", "internal", "test", "testdata", "simple-resource-schema.json"))
+	if err != nil {
+		panic(err)
+	}
+
+	var pkgSpec PackageSpec
+	if err = json.Unmarshal(schemaBytes, &pkgSpec); err != nil {
+		panic(err)
+	}
+
+	pkg, err := ImportSpec(pkgSpec, nil)
+	if err != nil {
+		t.Errorf("ImportSpec() error = %v", err)
+	}
+
+	for _, r := range pkg.Resources {
+		assert.NotNil(t, r.Package, "expected resource %s to have an associated Package", r.Token)
+	}
+}
